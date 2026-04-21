@@ -45,7 +45,8 @@ namespace Tokito.Services.Games
             {
                 return null;
             }
-
+            var f = _mapper.Map<GameViewDTO>(game);
+            return f;
             return new GameViewDTO
             {
                 gameId = game.GameId,
@@ -70,8 +71,10 @@ namespace Tokito.Services.Games
                 PublisherName = game.PublisherName,
                 MostOneTimePlayers  = game.MostOneTimePlayers,
                 Tags = game.Tags,
-                Description = game.Desription
+                Description = game.Desription,
+                
             };
+
         }
 
         public Task<IReadOnlyCollection<Game>> GetGamesAsync()

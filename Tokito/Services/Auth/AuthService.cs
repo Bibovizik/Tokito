@@ -1,5 +1,5 @@
 ﻿using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Tokito.DTOs.UserDTOs;
 using Tokito.Models;
 
@@ -42,11 +42,20 @@ namespace Tokito.Services.Auth
             var user = await _userManager.FindByEmailAsync(dto.Email);
             if (user == null) return Microsoft.AspNetCore.Identity.SignInResult.Failed;
 
-            return await _signInManager.PasswordSignInAsync(
-                user.UserName!,
-                dto.Password,
-                isPersistent: false,
-                lockoutOnFailure: false);
+            var passwordValid = await _userManager.CheckPasswordAsync(user, dto.Password);
+            if (!passwordValid) return SignInResult.Failed;
+
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Email, user.Email ?? ""),
+                new Claim(ClaimTypes.Name, user.UserName ?? ""),
+                new Claim("countryCode", user.CountryCode) // ✅ your custom claim
+            };
+
+            await _signInManager.SignInWithClaimsAsync(user, isPersistent: false, claims);
+
+            return SignInResult.Success;
         }
 
         public async Task LogoutAsync()

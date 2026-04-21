@@ -46,7 +46,5 @@ public partial class Game
     [Required]
     [Range(0, double.MaxValue)]
     public decimal BasePriceUah { get; set; }
-
-
 }
 

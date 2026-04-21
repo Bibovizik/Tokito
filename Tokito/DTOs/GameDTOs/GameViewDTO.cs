@@ -29,5 +29,6 @@ namespace Tokito.DTOs.GameDTOs
         public string? ImageUrl { get; set; }
         public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
         public List<GameReviewViewDTO> GameReviews { get; set; } = new();
+        public decimal BasePriceUah { get; set; }
     }
 }

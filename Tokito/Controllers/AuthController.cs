@@ -22,12 +22,14 @@ namespace Tokito.Controllers
                 var email = User.FindFirstValue(ClaimTypes.Email);
 
                 var username = User.Identity.Name;
+                var countryCode = User.FindFirst("countryCode")?.Value;
 
                 return Ok(new
                 {
                     id = userId,
                     email = email,
-                    username = username
+                    username = username,
+                    countryCode = countryCode
                 });
             }
             return Unauthorized();
