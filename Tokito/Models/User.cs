@@ -13,9 +13,7 @@ public partial class User : IdentityUser<int>
     public byte AccountStatus { get; set; }
 
     public string? CountryId { get; set; }
-
-    public virtual Country? Country { get; set; }
-
+    public string CountryCode { get; set; } = null!;
     public virtual ICollection<Game> Games { get; set; } = new List<Game>();
 
     public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();

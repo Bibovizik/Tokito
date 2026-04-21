@@ -1,6 +1,8 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using AutoMapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
+using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Services.Auth;
 using Tokito.Services.Games;
@@ -12,9 +14,11 @@ namespace Tokito.Controllers
     public class GameController : ControllerBase
     {
         public IGameService _gameService;
-        public GameController(IGameService gameService)
+        public IMapper _mapper;
+        public GameController(IGameService gameService, IMapper mapper)
         {
             _gameService = gameService;
+            _mapper = mapper;
         }
         [HttpGet("{id}")]
         public async Task<IActionResult> GetGameById([FromRoute] int id)
@@ -46,11 +50,13 @@ namespace Tokito.Controllers
 
             return Ok("Success");
         }
+
         [HttpGet("genres/{genre}")]
         public async Task<IActionResult> GetGamesByGenres([FromRoute] string genre)
         {
-            var filteredGames = _gameService.GetGamesByGenresAsync();
-            if (filteredGames.)
+            var filteredGames = await _gameService.GetGamesByGenresAsync(genre);
+            if (filteredGames is null) return NotFound();
+            return Ok(filteredGames);
         } 
 
     };

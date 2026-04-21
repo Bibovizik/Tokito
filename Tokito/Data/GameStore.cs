@@ -1,9 +1,6 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Numerics;
 using Tokito.Models;
 
 namespace Tokito.Data;
@@ -20,13 +17,9 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
     }
 
 
-    public virtual DbSet<Country> Countries { get; set; }
-
     public virtual DbSet<Game> Games { get; set; }
 
     public virtual DbSet<Genre> Genres { get; set; }
-
-    public virtual DbSet<Platform> Platforms { get; set; }
 
     public virtual DbSet<Publisher> Publishers { get; set; }
 
@@ -43,25 +36,9 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<Country>(entity =>
-        {
-            entity.HasKey(e => e.Code);
-            entity.Property(e => e.Code).ValueGeneratedNever();
-            entity.HasOne(e => e.Region)
-                .WithMany(r => r.Countries)
-                .HasForeignKey(e => e.RegionId);
-        });
-
         modelBuilder.Entity<User>(entity =>
         {
             entity.ToTable("Users");
-
-            entity.HasOne(e => e.Country)
-                .WithMany(c => c.Users)
-                .HasForeignKey(e => e.CountryId)
-                .HasPrincipalKey(c => c.Code)
-                .IsRequired(false)
-                .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasMany(e => e.Games)
                 .WithMany(g => g.Users)
@@ -73,27 +50,11 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
                 );
         });
 
-        modelBuilder.Entity<Platform>(entity =>
-        {
-            entity.HasOne(e => e.Country)
-                .WithMany(c => c.Platforms)
-                .HasForeignKey(e => e.CountryId)
-                .HasPrincipalKey(c => c.Code)
-                .IsRequired(false);
-        });
-
         modelBuilder.Entity<Publisher>(entity =>
         {
             entity.HasOne(e => e.User)
                 .WithOne()
                 .HasForeignKey<Publisher>(e => e.UserId)
-                .OnDelete(DeleteBehavior.NoAction);
-
-            entity.HasOne(e => e.Country)
-                .WithMany(c => c.Publishers)
-                .HasForeignKey(e => e.CountryId)
-                .HasPrincipalKey(c => c.Code)
-                .IsRequired(false)
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -134,10 +95,6 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
             entity.HasOne(e => e.Game)
                 .WithMany()
                 .HasForeignKey(e => e.GameId);
-
-            entity.HasOne(e => e.Platform)
-                .WithMany()
-                .HasForeignKey(e => e.PlatformId);
 
             entity.HasOne(e => e.Region)
                 .WithMany(r => r.RegionalPrices)

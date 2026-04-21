@@ -15,5 +15,5 @@ public partial class Platform
 
     public string? CountryId { get; set; }
 
-    public virtual Country? Country { get; set; }
+    //public virtual Country? Country { get; set; }
 }

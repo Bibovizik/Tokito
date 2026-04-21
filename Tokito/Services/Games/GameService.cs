@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using AutoMapper;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,10 +14,11 @@ namespace Tokito.Services.Games
 {
     public class GameService : IGameService
     {
-
+        private IMapper _mapper;
         private GameStore _gameStore;
-        public GameService(GameStore gameStore)
+        public GameService(GameStore gameStore, IMapper mapper)
         {
+            _mapper = mapper;
             _gameStore = gameStore;
         }
 
@@ -79,14 +81,15 @@ namespace Tokito.Services.Games
 
         public async Task<List<GameViewDTO>> GetGamesByGenresAsync(string genre)
         {
-            var filteredGames = await _gameStore.Games.Where(game => game.Genres.Any(g => g.Name == genre))
-                .Select(game => new GameViewDTO
-            {
-                    gameId = game.GameId,
-
-            })
+            
+            var filteredGames = await 
+                _gameStore.Games
+                .Where(game => game.Genres.Any(g => g.Name == genre))
                 .ToListAsync();
-            return filteredGames;
+
+            var filteredGamesDto = _mapper.Map<List<GameViewDTO>>(filteredGames);
+
+            return filteredGamesDto;
         }
     }
 }

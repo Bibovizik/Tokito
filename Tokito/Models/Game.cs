@@ -42,5 +42,11 @@ public partial class Game
     public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
 
     public virtual ICollection<GameReview> GameReviews { get; set; } = new List<GameReview>();
+
+    [Required]
+    [Range(0, double.MaxValue)]
+    public decimal BasePriceUah { get; set; }
+
+
 }
 

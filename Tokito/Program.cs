@@ -1,12 +1,17 @@
 
+using AutoMapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using Tokito.Data;
+using Tokito.DTOs.GameDTOs;
+using Tokito.Mappers;
 using Tokito.Models;
 using Tokito.Services.Auth;
 using Tokito.Services.Games;
@@ -22,6 +27,7 @@ namespace Tokito
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
+            builder.Services.AddAutoMapper(cfg => { }, typeof(GameProfile));
             builder.Services.AddIdentity<User, IdentityRole<int>>(options =>
             {
             })
@@ -61,8 +67,6 @@ namespace Tokito
                         .AllowCredentials();
                     });
             });
-
-
 
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IGameService, GameService>();

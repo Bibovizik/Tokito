@@ -33,6 +33,7 @@ namespace Tokito.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Registration([FromBody] UserRegistrationDTO userRegistrationDTO)
         {
+            
             var result = await _authService.RegisterUserAsync(userRegistrationDTO);
             return result.Succeeded ? Ok() : BadRequest(result.Errors);
         }

@@ -7,7 +7,6 @@ namespace Tokito.Models;
 public partial class Country
 {
     public string Name { get; set; } = null!;
-
     [Key]
     public string Code { get; set; } = null!;
 

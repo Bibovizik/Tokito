@@ -25,7 +25,8 @@ namespace Tokito.Services.Auth
                 UserNickname = dto.UserNickname,
                 Email = dto.Email,
                 RegistrationDate = DateOnly.FromDateTime(DateTime.Now),
-                AccountStatus = 1
+                AccountStatus = 1,
+                CountryCode = dto.CountryCode,
             };
             
             var result = await _userManager.CreateAsync(user, dto.Password);
@@ -38,13 +39,14 @@ namespace Tokito.Services.Auth
 
         public async Task<Microsoft.AspNetCore.Identity.SignInResult> LoginAsync(UserLoginDTO dto)
         {
-            var result = await _signInManager.PasswordSignInAsync(
-                dto.Email,
-                dto.Password,
-                isPersistent: false, 
-                lockoutOnFailure: false);
+            var user = await _userManager.FindByEmailAsync(dto.Email);
+            if (user == null) return Microsoft.AspNetCore.Identity.SignInResult.Failed;
 
-            return result;
+            return await _signInManager.PasswordSignInAsync(
+                user.UserName!,
+                dto.Password,
+                isPersistent: false,
+                lockoutOnFailure: false);
         }
 
         public async Task LogoutAsync()

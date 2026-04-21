@@ -13,6 +13,8 @@ public class Transaction
     public DateTime PurchaseDate { get; set; }
     public decimal AmountPaid { get; set; }
     public string CurrencyCode { get; set; } = null!;
+    public decimal BasePriceUahSnapshot { get; set; }
+    public decimal ExchangeRateSnapshot { get; set; }
     public virtual User User { get; set; } = null!;
     public virtual Game Game { get; set; } = null!;
 }
