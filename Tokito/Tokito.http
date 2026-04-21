@@ -1,0 +1,6 @@
+@Tokito_HostAddress = http://localhost:5283
+
+GET {{Tokito_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
