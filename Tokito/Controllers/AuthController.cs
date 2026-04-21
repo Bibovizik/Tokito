@@ -14,7 +14,7 @@ namespace Tokito.Controllers
             _authService = authService;
         }
         [HttpGet("status")]
-        public async Task<IActionResult> UserStatus()
+        public IActionResult UserStatus()
         {
             if (User.Identity != null && User.Identity.IsAuthenticated) 
             {
@@ -43,5 +43,5 @@ namespace Tokito.Controllers
 
             return Ok("User.Identity");
         }
-    };
+    }
 }

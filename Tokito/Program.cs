@@ -15,6 +15,7 @@ using Tokito.Mappers;
 using Tokito.Models;
 using Tokito.Services.Auth;
 using Tokito.Services.Games;
+using Tokito.Services.Wallets;
 
 namespace Tokito
 {
@@ -70,6 +71,7 @@ namespace Tokito
 
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IGameService, GameService>();
+            builder.Services.AddScoped<IWalletService, WalletService>();
             var app = builder.Build();
 
             //using (var scope = app.Services.CreateScope())

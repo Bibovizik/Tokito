@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Tokito.Data;
 
@@ -11,9 +12,11 @@ using Tokito.Data;
 namespace Tokito.Migrations
 {
     [DbContext(typeof(GameStore))]
-    partial class GameStoreModelSnapshot : ModelSnapshot
+    [Migration("20260421174425_AddWalletBalancesAndServerPricing")]
+    partial class AddWalletBalancesAndServerPricing
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -471,8 +474,7 @@ namespace Tokito.Migrations
 
                     b.Property<string>("CountryCode")
                         .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("nvarchar(3)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("CountryId")
                         .HasColumnType("nvarchar(max)");
@@ -548,6 +550,11 @@ namespace Tokito.Migrations
                     b.Property<decimal>("AvailableAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -559,7 +566,7 @@ namespace Tokito.Migrations
 
                     b.HasKey("WalletBalanceId");
 
-                    b.HasIndex("UserId")
+                    b.HasIndex("UserId", "CurrencyCode")
                         .IsUnique();
 
                     b.ToTable("WalletBalances");

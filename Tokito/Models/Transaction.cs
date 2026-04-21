@@ -14,7 +14,10 @@ public class Transaction
     public decimal AmountPaid { get; set; }
     public string CurrencyCode { get; set; } = null!;
     public decimal BasePriceUahSnapshot { get; set; }
-    public decimal ExchangeRateSnapshot { get; set; }
+    public decimal? ExchangeRateSnapshot { get; set; }
+    public string PriceSource { get; set; } = "BasePriceUah";
+    public int? RegionId { get; set; }
     public virtual User User { get; set; } = null!;
     public virtual Game Game { get; set; } = null!;
+    public virtual Region? Region { get; set; }
 }

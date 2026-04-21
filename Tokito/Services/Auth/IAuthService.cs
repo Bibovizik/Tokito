@@ -9,6 +9,7 @@ namespace Tokito.Services.Auth
     {
         Task<IdentityResult> RegisterUserAsync(UserRegistrationDTO dto);
         Task<Microsoft.AspNetCore.Identity.SignInResult> LoginAsync(UserLoginDTO dto);
+        Task<ChangeCountryResultDto> ChangeCountryAsync(int userId, ChangeCountryDto dto);
         Task LogoutAsync();
     }
 }

@@ -21,9 +21,11 @@ namespace Tokito.Controllers
             _mapper = mapper;
         }
         [HttpGet("{id}")]
-        public async Task<IActionResult> GetGameById([FromRoute] int id)
+        public async Task<IActionResult> GetGameById([FromRoute] int id, [FromQuery] string? countryCode = null)
         {
-            var game = await _gameService.GetGameByIdAsync(id);
+            var userId = TryGetCurrentUserId();
+            var effectiveCountryCode = User.FindFirst("countryCode")?.Value ?? countryCode;
+            var game = await _gameService.GetGameByIdAsync(id, userId, effectiveCountryCode);
             if (game == null)
             {
                 return NotFound();
@@ -51,13 +53,48 @@ namespace Tokito.Controllers
             return Ok("Success");
         }
 
+        [Authorize]
+        [HttpPost("{gameId}/purchase")]
+        public async Task<IActionResult> PurchaseGame([FromRoute] int gameId)
+        {
+            var userId = TryGetCurrentUserId();
+
+            if (!userId.HasValue)
+            {
+                return Unauthorized("Invalid user token.");
+            }
+
+            var result = await _gameService.PurchaseGameAsync(userId.Value, gameId);
+
+            return result.Status switch
+            {
+                PurchaseGameStatus.Success => Ok(result.Receipt),
+                PurchaseGameStatus.GameNotFound => NotFound(new { message = result.Message }),
+                PurchaseGameStatus.UserNotFound => Unauthorized(new { message = result.Message }),
+                PurchaseGameStatus.AlreadyOwned => Conflict(new { message = result.Message }),
+                PurchaseGameStatus.InsufficientFunds => BadRequest(new { message = result.Message }),
+                PurchaseGameStatus.ConcurrencyConflict => Conflict(new { message = result.Message }),
+                PurchaseGameStatus.PurchaseConflict => Conflict(new { message = result.Message }),
+                _ => BadRequest(new { message = result.Message })
+            };
+        }
+
         [HttpGet("genres/{genre}")]
         public async Task<IActionResult> GetGamesByGenres([FromRoute] string genre)
         {
             var filteredGames = await _gameService.GetGamesByGenresAsync(genre);
             if (filteredGames is null) return NotFound();
             return Ok(filteredGames);
-        } 
+        }
+
+        private int? TryGetCurrentUserId()
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            return int.TryParse(userIdString, out int userId)
+                ? userId
+                : null;
+        }
 
     };
 }

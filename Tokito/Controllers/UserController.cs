@@ -1,6 +1,6 @@
-﻿using Humanizer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Tokito.DTOs.UserDTOs;
 using Tokito.Services.Auth;
 
@@ -17,14 +17,14 @@ namespace Tokito.Controllers
         }
         [Authorize]
         [HttpGet("test")]
-        public async Task<IActionResult> TestingAuthorize()
+        public IActionResult TestingAuthorize()
         {
             return Ok("Hi!");
         }
 
         [Authorize(Roles = "Admin")]
         [HttpGet("testAdmin")]
-        public async Task<IActionResult> TestingAdmin()
+        public IActionResult TestingAdmin()
         {
             return Ok("Hello, mr Admin!");
         }
@@ -33,7 +33,7 @@ namespace Tokito.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Registration([FromBody] UserRegistrationDTO userRegistrationDTO)
         {
-            
+
             var result = await _authService.RegisterUserAsync(userRegistrationDTO);
             return result.Succeeded ? Ok() : BadRequest(result.Errors);
         }
@@ -51,6 +51,36 @@ namespace Tokito.Controllers
                 return StatusCode(423, "Account locked");
 
             return Unauthorized(new { message = "Invalid email or password" });
+        }
+
+        [Authorize]
+        [HttpPost("change-country")]
+        public async Task<IActionResult> ChangeCountry([FromBody] ChangeCountryDto dto)
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            if (string.IsNullOrWhiteSpace(userIdString) || !int.TryParse(userIdString, out var userId))
+            {
+                return Unauthorized("Invalid user token.");
+            }
+
+            try
+            {
+                var result = await _authService.ChangeCountryAsync(userId, dto);
+                return Ok(result);
+            }
+            catch (ArgumentOutOfRangeException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
         }
     }
 }

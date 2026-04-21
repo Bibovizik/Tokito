@@ -30,5 +30,8 @@ namespace Tokito.DTOs.GameDTOs
         public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
         public List<GameReviewViewDTO> GameReviews { get; set; } = new();
         public decimal BasePriceUah { get; set; }
+        public GamePriceDto? CurrentPrice { get; set; }
+        public GamePriceDto? WalletPrice { get; set; }
+        public bool IsOwnedByCurrentUser { get; set; }
     }
 }

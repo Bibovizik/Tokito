@@ -37,6 +37,8 @@ public partial class Game
 
     public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
 
+    public virtual ICollection<RegionalPrice> RegionalPrices { get; set; } = new List<RegionalPrice>();
+
     public string? ImageUrl { get; set; }
 
     public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
