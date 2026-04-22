@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Tokito.Data;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.DTOs.Genres;
 using Tokito.Models;
+using Tokito.Services.GameImages;
 using Tokito.Services.Markets;
 using Tokito.Services.Pricing;
 using Tokito.Services.Statuses.GameStatuses;
@@ -18,15 +20,18 @@ namespace Tokito.Services.Games
         private static readonly TimeZoneInfo KyivTimeZone = ResolveKyivTimeZone();
 
         private readonly GameStore _gameStore;
+        private readonly IGameImageStorage _gameImageStorage;
         private readonly IMarketResolver _marketResolver;
         private readonly INbuExchangeRateService _nbuExchangeRateService;
 
         public GameService(
             GameStore gameStore,
+            IGameImageStorage gameImageStorage,
             IMarketResolver marketResolver,
             INbuExchangeRateService nbuExchangeRateService)
         {
             _gameStore = gameStore;
+            _gameImageStorage = gameImageStorage;
             _marketResolver = marketResolver;
             _nbuExchangeRateService = nbuExchangeRateService;
         }
@@ -142,8 +147,15 @@ namespace Tokito.Services.Games
                 .ToList();
         }
 
-        public async Task<CreatedGameDto> CreateGameAsync(int publisherId, CreateGameDto dto, CancellationToken cancellationToken = default)
+        public async Task<CreatedGameDto> CreateGameAsync(
+            int publisherId,
+            CreateGameDto dto,
+            IFormFile? imageFile = null,
+            CancellationToken cancellationToken = default)
         {
+            await using var dbTransaction = await _gameStore.Database.BeginTransactionAsync(cancellationToken);
+            string? storedImageUrl = null;
+
             var publisher = await _gameStore.Publishers
                 .AsNoTracking()
                 .SingleOrDefaultAsync(p => p.PublisherId == publisherId, cancellationToken);
@@ -171,7 +183,9 @@ namespace Tokito.Services.Games
                 SystemRequirements = GameJsonSerializer.Serialize(dto.SystemRequirements),
                 MostOneTimePlayers = dto.MostOneTimePlayers,
                 Desription = dto.Description.Trim(),
-                ImageUrl = NormalizeOptionalText(dto.ImageUrl),
+                ImageUrl = imageFile == null
+                    ? NormalizeOptionalText(dto.ImageUrl)
+                    : null,
                 BasePriceUah = dto.BasePriceUah,
                 RegionalPrices = plannedMarketPrices
                     .Select(MapRegionalPriceEntity)
@@ -184,13 +198,45 @@ namespace Tokito.Services.Games
             }
 
             _gameStore.Games.Add(game);
-            await _gameStore.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _gameStore.SaveChangesAsync(cancellationToken);
+
+                if (imageFile != null)
+                {
+                    storedImageUrl = await _gameImageStorage.SaveGameImageAsync(game.GameId, imageFile, cancellationToken);
+                    game.ImageUrl = storedImageUrl;
+                    await _gameStore.SaveChangesAsync(cancellationToken);
+                }
+
+                await dbTransaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await dbTransaction.RollbackAsync(cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(storedImageUrl))
+                {
+                    await _gameImageStorage.DeleteImageAsync(storedImageUrl, cancellationToken);
+                }
+
+                throw;
+            }
 
             return MapCreatedGameDto(game, publisher.Name, genres, plannedMarketPrices);
         }
 
-        public async Task<CreatedGameDto> UpdateGameAsync(int gameId, int publisherId, UpdateGameDto dto, CancellationToken cancellationToken = default)
+        public async Task<CreatedGameDto> UpdateGameAsync(
+            int gameId,
+            int publisherId,
+            UpdateGameDto dto,
+            IFormFile? imageFile = null,
+            bool preserveExistingImage = true,
+            CancellationToken cancellationToken = default)
         {
+            await using var dbTransaction = await _gameStore.Database.BeginTransactionAsync(cancellationToken);
+            string? storedImageUrl = null;
+
             var game = await _gameStore.Games
                 .Include(g => g.Genres)
                 .Include(g => g.RegionalPrices)
@@ -207,6 +253,8 @@ namespace Tokito.Services.Games
                 throw new UnauthorizedAccessException("You can only update your own games.");
             }
 
+            var previousImageUrl = game.ImageUrl;
+            var normalizedImageUrl = NormalizeOptionalText(dto.ImageUrl);
             var genres = await GetGenresAsync(dto.GenreIds, cancellationToken);
             var supportedMarkets = await GetSupportedMarketsAsync(cancellationToken);
             var preservedManualPrices = dto.MarketPriceOverrides == null
@@ -230,8 +278,12 @@ namespace Tokito.Services.Games
             game.SystemRequirements = GameJsonSerializer.Serialize(dto.SystemRequirements);
             game.MostOneTimePlayers = dto.MostOneTimePlayers;
             game.Desription = dto.Description.Trim();
-            game.ImageUrl = NormalizeOptionalText(dto.ImageUrl);
             game.BasePriceUah = dto.BasePriceUah;
+
+            if (imageFile == null && (normalizedImageUrl != null || !preserveExistingImage))
+            {
+                game.ImageUrl = normalizedImageUrl;
+            }
 
             game.Genres.Clear();
             foreach (var genre in genres)
@@ -241,7 +293,35 @@ namespace Tokito.Services.Games
 
             SyncRegionalPrices(game, plannedMarketPrices);
 
-            await _gameStore.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _gameStore.SaveChangesAsync(cancellationToken);
+
+                if (imageFile != null)
+                {
+                    storedImageUrl = await _gameImageStorage.SaveGameImageAsync(game.GameId, imageFile, cancellationToken);
+                    game.ImageUrl = storedImageUrl;
+                    await _gameStore.SaveChangesAsync(cancellationToken);
+                }
+
+                await dbTransaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await dbTransaction.RollbackAsync(cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(storedImageUrl))
+                {
+                    await _gameImageStorage.DeleteImageAsync(storedImageUrl, cancellationToken);
+                }
+
+                throw;
+            }
+
+            if (!string.Equals(previousImageUrl, game.ImageUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                await _gameImageStorage.DeleteImageAsync(previousImageUrl, cancellationToken);
+            }
 
             return MapCreatedGameDto(game, game.PublisherName ?? string.Empty, genres, plannedMarketPrices);
         }
@@ -492,8 +572,10 @@ namespace Tokito.Services.Games
                 return DeleteGameResult.Failure(DeleteGameStatus.InsufficientRights, "Nuh-uh, you can't delete someone else's game.");
             }
 
+            var previousImageUrl = gameToBeDeleted.ImageUrl;
             _gameStore.Games.Remove(gameToBeDeleted);
             await _gameStore.SaveChangesAsync();
+            await _gameImageStorage.DeleteImageAsync(previousImageUrl);
 
             return DeleteGameResult.Success(new DeleteGameResultDto
             {

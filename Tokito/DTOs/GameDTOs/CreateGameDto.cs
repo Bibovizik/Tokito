@@ -23,7 +23,6 @@ namespace Tokito.DTOs.GameDTOs
         [Range(0, double.MaxValue)]
         public decimal BasePriceUah { get; set; }
 
-        [Url]
         public string? ImageUrl { get; set; }
 
         public ICollection<int> GenreIds { get; set; } = [];

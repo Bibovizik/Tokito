@@ -1,9 +1,9 @@
+using Microsoft.AspNetCore.Http;
 using System.ComponentModel.DataAnnotations;
-using System.Text.Json;
 
 namespace Tokito.DTOs.GameDTOs
 {
-    public class UpdateGameDto
+    public class GameUpsertFormDto
     {
         [Required]
         [StringLength(200)]
@@ -11,7 +11,7 @@ namespace Tokito.DTOs.GameDTOs
 
         public DateOnly? ReleaseDate { get; set; }
 
-        public JsonElement? SystemRequirements { get; set; }
+        public string? SystemRequirementsJson { get; set; }
 
         [Range(1, int.MaxValue)]
         public int MostOneTimePlayers { get; set; }
@@ -23,10 +23,15 @@ namespace Tokito.DTOs.GameDTOs
         [Range(0, double.MaxValue)]
         public decimal BasePriceUah { get; set; }
 
+        [StringLength(2048)]
         public string? ImageUrl { get; set; }
 
-        public ICollection<int> GenreIds { get; set; } = [];
+        public IFormFile? Image { get; set; }
 
-        public ICollection<CreateGameMarketPriceOverrideDto>? MarketPriceOverrides { get; set; }
+        public string? GenreIdsJson { get; set; }
+
+        public string? MarketPriceOverridesJson { get; set; }
+
+        public bool PreserveExistingImage { get; set; } = true;
     }
 }

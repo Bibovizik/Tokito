@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Services.Statuses.GameStatuses;
@@ -12,9 +13,19 @@ namespace Tokito.Services.Games
 
         Task<List<GameViewDTO>> GetLibraryAsync(int userId, string? genre = null, string? countryCode = null);
 
-        Task<CreatedGameDto> CreateGameAsync(int publisherId, CreateGameDto dto, CancellationToken cancellationToken = default);
+        Task<CreatedGameDto> CreateGameAsync(
+            int publisherId,
+            CreateGameDto dto,
+            IFormFile? imageFile = null,
+            CancellationToken cancellationToken = default);
 
-        Task<CreatedGameDto> UpdateGameAsync(int gameId, int publisherId, UpdateGameDto dto, CancellationToken cancellationToken = default);
+        Task<CreatedGameDto> UpdateGameAsync(
+            int gameId,
+            int publisherId,
+            UpdateGameDto dto,
+            IFormFile? imageFile = null,
+            bool preserveExistingImage = true,
+            CancellationToken cancellationToken = default);
 
         Task<GameDashboardDto> GetDashboardAsync(
             int? requestingPublisherId,

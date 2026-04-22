@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Text.Json;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Services.Games;
@@ -93,12 +94,18 @@ namespace Tokito.Controllers
 
         [Authorize(Roles = "Publisher")]
         [HttpPost]
-        [EndpointDescription("Create a game and seed prices for all supported pricing markets")]
-        public async Task<IActionResult> CreateGame([FromBody] CreateGameDto dto, CancellationToken cancellationToken)
+        [Consumes("multipart/form-data")]
+        [EndpointDescription("Create a game, optionally upload an image, and seed prices for all supported pricing markets")]
+        public async Task<IActionResult> CreateGame([FromForm] GameUpsertFormDto request, CancellationToken cancellationToken)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
+            }
+
+            if (!TryMapCreateGameDto(request, out var dto, out var parseError))
+            {
+                return BadRequest(new { message = parseError });
             }
 
             var publisherId = GetPublisherId();
@@ -109,7 +116,11 @@ namespace Tokito.Controllers
 
             try
             {
-                var createdGame = await _gameService.CreateGameAsync(publisherId.Value, dto, cancellationToken);
+                var createdGame = await _gameService.CreateGameAsync(
+                    publisherId.Value,
+                    dto,
+                    request.Image,
+                    cancellationToken);
                 return CreatedAtAction(nameof(GetGameById), new { id = createdGame.GameId }, createdGame);
             }
             catch (ArgumentException exception)
@@ -132,11 +143,17 @@ namespace Tokito.Controllers
 
         [Authorize(Roles = "Publisher")]
         [HttpPut("{id:int}")]
-        public async Task<IActionResult> UpdateGame([FromRoute] int id, [FromBody] UpdateGameDto dto, CancellationToken cancellationToken)
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UpdateGame([FromRoute] int id, [FromForm] GameUpsertFormDto request, CancellationToken cancellationToken)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
+            }
+
+            if (!TryMapUpdateGameDto(request, out var dto, out var parseError))
+            {
+                return BadRequest(new { message = parseError });
             }
 
             var publisherId = GetPublisherId();
@@ -147,7 +164,13 @@ namespace Tokito.Controllers
 
             try
             {
-                var updatedGame = await _gameService.UpdateGameAsync(id, publisherId.Value, dto, cancellationToken);
+                var updatedGame = await _gameService.UpdateGameAsync(
+                    id,
+                    publisherId.Value,
+                    dto,
+                    request.Image,
+                    request.PreserveExistingImage,
+                    cancellationToken);
                 return Ok(updatedGame);
             }
             catch (ArgumentException exception)
@@ -251,6 +274,189 @@ namespace Tokito.Controllers
             return int.TryParse(publisherIdClaim, out var publisherId)
                 ? publisherId
                 : null;
+        }
+
+        private static bool TryMapCreateGameDto(GameUpsertFormDto request, out CreateGameDto dto, out string? error)
+        {
+            dto = new CreateGameDto();
+
+            if (!TryParseJsonElement(request.SystemRequirementsJson, nameof(request.SystemRequirementsJson), out var systemRequirements, out error) ||
+                !TryParseGenreIds(request.GenreIdsJson, out var genreIds, out error) ||
+                !TryParseCreateMarketPriceOverrides(request.MarketPriceOverridesJson, out var marketPriceOverrides, out error))
+            {
+                return false;
+            }
+
+            dto = new CreateGameDto
+            {
+                Name = request.Name,
+                ReleaseDate = request.ReleaseDate,
+                SystemRequirements = systemRequirements,
+                MostOneTimePlayers = request.MostOneTimePlayers,
+                Description = request.Description,
+                BasePriceUah = request.BasePriceUah,
+                ImageUrl = request.ImageUrl,
+                GenreIds = genreIds,
+                MarketPriceOverrides = marketPriceOverrides
+            };
+
+            error = null;
+            return true;
+        }
+
+        private static bool TryMapUpdateGameDto(GameUpsertFormDto request, out UpdateGameDto dto, out string? error)
+        {
+            dto = new UpdateGameDto();
+
+            if (!TryParseJsonElement(request.SystemRequirementsJson, nameof(request.SystemRequirementsJson), out var systemRequirements, out error) ||
+                !TryParseGenreIds(request.GenreIdsJson, out var genreIds, out error) ||
+                !TryParseUpdateMarketPriceOverrides(request.MarketPriceOverridesJson, out var marketPriceOverrides, out error))
+            {
+                return false;
+            }
+
+            dto = new UpdateGameDto
+            {
+                Name = request.Name,
+                ReleaseDate = request.ReleaseDate,
+                SystemRequirements = systemRequirements,
+                MostOneTimePlayers = request.MostOneTimePlayers,
+                Description = request.Description,
+                BasePriceUah = request.BasePriceUah,
+                ImageUrl = request.ImageUrl,
+                GenreIds = genreIds,
+                MarketPriceOverrides = marketPriceOverrides
+            };
+
+            error = null;
+            return true;
+        }
+
+        private static bool TryParseJsonElement(string? json, string fieldName, out JsonElement? value, out string? error)
+        {
+            value = null;
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                error = null;
+                return true;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                value = document.RootElement.Clone();
+                error = null;
+                return true;
+            }
+            catch (JsonException exception)
+            {
+                error = $"{fieldName} must contain valid JSON. {exception.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryParseGenreIds(string? json, out ICollection<int> genreIds, out string? error)
+        {
+            genreIds = [];
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                error = null;
+                return true;
+            }
+
+            try
+            {
+                var parsedGenreIds = JsonSerializer.Deserialize<List<int>>(json);
+                if (parsedGenreIds == null)
+                {
+                    error = "GenreIdsJson must contain a JSON array of integers.";
+                    return false;
+                }
+
+                genreIds = parsedGenreIds;
+                error = null;
+                return true;
+            }
+            catch (JsonException exception)
+            {
+                error = $"GenreIdsJson must contain a JSON array of integers. {exception.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryParseCreateMarketPriceOverrides(
+            string? json,
+            out ICollection<CreateGameMarketPriceOverrideDto> marketPriceOverrides,
+            out string? error)
+        {
+            marketPriceOverrides = [];
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                error = null;
+                return true;
+            }
+
+            try
+            {
+                var parsedOverrides = JsonSerializer.Deserialize<List<CreateGameMarketPriceOverrideDto>>(json, CreateJsonSerializerOptions());
+                if (parsedOverrides == null)
+                {
+                    error = "MarketPriceOverridesJson must contain a JSON array.";
+                    return false;
+                }
+
+                marketPriceOverrides = parsedOverrides;
+                error = null;
+                return true;
+            }
+            catch (JsonException exception)
+            {
+                error = $"MarketPriceOverridesJson must contain a JSON array. {exception.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryParseUpdateMarketPriceOverrides(
+            string? json,
+            out ICollection<CreateGameMarketPriceOverrideDto>? marketPriceOverrides,
+            out string? error)
+        {
+            marketPriceOverrides = null;
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                error = null;
+                return true;
+            }
+
+            try
+            {
+                marketPriceOverrides = JsonSerializer.Deserialize<List<CreateGameMarketPriceOverrideDto>>(json, CreateJsonSerializerOptions());
+                if (marketPriceOverrides == null)
+                {
+                    error = "MarketPriceOverridesJson must contain a JSON array.";
+                    return false;
+                }
+
+                error = null;
+                return true;
+            }
+            catch (JsonException exception)
+            {
+                error = $"MarketPriceOverridesJson must contain a JSON array. {exception.Message}";
+                return false;
+            }
+        }
+
+        private static JsonSerializerOptions CreateJsonSerializerOptions()
+        {
+            return new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
         }
     }
 }

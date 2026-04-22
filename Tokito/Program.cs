@@ -8,6 +8,7 @@ using Tokito.Data;
 using Tokito.Mappers;
 using Tokito.Models;
 using Tokito.Services.Auth;
+using Tokito.Services.GameImages;
 using Tokito.Services.GameReviews;
 using Tokito.Services.Games;
 using Tokito.Services.Markets;
@@ -97,6 +98,7 @@ namespace Tokito
             });
 
             builder.Services.AddScoped<IAuthService, AuthService>();
+            builder.Services.AddScoped<IGameImageStorage, GameImageStorage>();
             builder.Services.AddScoped<IGameService, GameService>();
             builder.Services.AddScoped<IMarketResolver, MarketResolver>();
             builder.Services.AddScoped<IWalletService, WalletService>();
@@ -138,14 +140,13 @@ namespace Tokito
             }
 
             app.UseHttpsRedirection();
+            app.UseStaticFiles();
             app.UseCors("AllowReactApp");
 
             app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapControllers();
-
-            app.UseStaticFiles();
             app.Run();
         }
     }
