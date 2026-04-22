@@ -33,7 +33,7 @@ namespace Tokito.Controllers
             return Ok(reviews);
         }
         [Authorize(Roles = "User")]
-        [HttpPost("createReview/{gameId:int}")]
+        [HttpPost("{gameId:int}")]
         [EndpointDescription("Post a review for a game")]
         public async Task<IActionResult> PostGameReview([FromRoute] int gameId, [FromBody] CreateReviewDto reviewDto)
         {
