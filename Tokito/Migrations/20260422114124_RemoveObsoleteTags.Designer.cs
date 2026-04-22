@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Tokito.Data;
 
@@ -11,9 +12,11 @@ using Tokito.Data;
 namespace Tokito.Migrations
 {
     [DbContext(typeof(GameStore))]
-    partial class GameStoreModelSnapshot : ModelSnapshot
+    [Migration("20260422114124_RemoveObsoleteTags")]
+    partial class RemoveObsoleteTags
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -365,22 +368,11 @@ namespace Tokito.Migrations
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<DateOnly?>("ExchangeDate")
-                        .HasColumnType("date");
-
-                    b.Property<decimal?>("ExchangeRateToUahSnapshot")
-                        .HasColumnType("decimal(18,6)");
-
                     b.Property<int>("GameId")
                         .HasColumnType("int");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
-
-                    b.Property<string>("PriceSource")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
 
                     b.Property<int>("RegionId")
                         .HasColumnType("int");

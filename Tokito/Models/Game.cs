@@ -41,8 +41,6 @@ public partial class Game
 
     public string? ImageUrl { get; set; }
 
-    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
-
     public virtual ICollection<GameReview> GameReviews { get; set; } = new List<GameReview>();
 
     [Required]

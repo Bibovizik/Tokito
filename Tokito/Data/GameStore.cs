@@ -25,6 +25,8 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
 
     public virtual DbSet<Region> Regions { get; set; }
 
+    public virtual DbSet<RegionCountry> RegionCountries { get; set; }
+
     public virtual DbSet<RegionalPrice> RegionalPrices { get; set; }
 
     public virtual DbSet<Transaction> Transactions { get; set; }
@@ -32,8 +34,6 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
     public virtual DbSet<WalletBalance> WalletBalances { get; set; }
 
     public virtual DbSet<WalletEntry> WalletEntries { get; set; }
-
-    public virtual DbSet<Tag> Tags { get; set; }
 
     public virtual DbSet<GameReview> GameReviews { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -128,6 +128,15 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
             entity.Property(e => e.Amount)
                 .HasColumnType("decimal(18,2)");
 
+            entity.Property(e => e.PriceSource)
+                .HasMaxLength(32);
+
+            entity.Property(e => e.ExchangeRateToUahSnapshot)
+                .HasColumnType("decimal(18,6)");
+
+            entity.Property(e => e.ExchangeDate)
+                .HasColumnType("date");
+
             entity.HasOne(e => e.Game)
                 .WithMany(g => g.RegionalPrices)
                 .HasForeignKey(e => e.GameId);
@@ -139,11 +148,11 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
 
         modelBuilder.Entity<Region>(entity =>
         {
-            entity.HasIndex(e => e.CountryCode)
+            entity.HasIndex(e => e.Code)
                 .IsUnique();
 
-            entity.Property(e => e.CountryCode)
-                .HasMaxLength(3);
+            entity.Property(e => e.Code)
+                .HasMaxLength(16);
 
             entity.Property(e => e.CurrencyCode)
                 .HasMaxLength(3);
@@ -153,6 +162,19 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
 
             entity.Property(e => e.Name)
                 .HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<RegionCountry>(entity =>
+        {
+            entity.HasKey(e => e.CountryCode);
+
+            entity.Property(e => e.CountryCode)
+                .HasMaxLength(3);
+
+            entity.HasOne(e => e.Region)
+                .WithMany(r => r.Countries)
+                .HasForeignKey(e => e.RegionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<WalletBalance>(entity =>
@@ -221,12 +243,6 @@ public partial class GameStore : IdentityDbContext<User, IdentityRole<int>, int>
             .WithMany(g => g.GameReviews)
             .HasForeignKey(gr => gr.GameId)
             .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<Game>()
-            .HasMany(g => g.Tags)
-            .WithMany(t => t.Games)
-            .UsingEntity(j => j.ToTable("GameTags"));
-
         OnModelCreatingPartial(modelBuilder);
     }
 

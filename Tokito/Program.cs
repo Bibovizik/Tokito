@@ -1,13 +1,16 @@
-
 using AutoMapper;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Tokito.Data;
 using Tokito.Mappers;
 using Tokito.Models;
 using Tokito.Services.Auth;
 using Tokito.Services.Games;
+using Tokito.Services.Markets;
+using Tokito.Services.Pricing;
 using Tokito.Services.Wallets;
 
 namespace Tokito
@@ -24,6 +27,7 @@ namespace Tokito
             builder.Services.AddAutoMapper(cfg => { }, typeof(GameProfile));
             builder.Services.AddIdentity<User, IdentityRole<int>>(options =>
             {
+                options.User.RequireUniqueEmail = true;
             })
             .AddEntityFrameworkStores<GameStore>()
             .AddDefaultTokenProviders()
@@ -48,6 +52,25 @@ namespace Tokito
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return Task.CompletedTask;
+                };
+
+                options.Events.OnValidatePrincipal = async context =>
+                {
+                    var userIdValue = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                    if (!int.TryParse(userIdValue, out var userId))
+                    {
+                        context.RejectPrincipal();
+                        await context.HttpContext.SignOutAsync();
+                        return;
+                    }
+
+                    var userManager = context.HttpContext.RequestServices.GetRequiredService<UserManager<User>>();
+                    var currentUser = await userManager.FindByIdAsync(userId.ToString());
+                    if (currentUser == null || currentUser.AccountStatus == UserAccountStatusValues.Blocked)
+                    {
+                        context.RejectPrincipal();
+                        await context.HttpContext.SignOutAsync();
+                    }
                 };
             });
 
@@ -74,11 +97,20 @@ namespace Tokito
 
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IGameService, GameService>();
+            builder.Services.AddScoped<IMarketResolver, MarketResolver>();
             builder.Services.AddScoped<IWalletService, WalletService>();
+            builder.Services.AddHttpClient<INbuExchangeRateService, NbuExchangeRateService>(client =>
+            {
+                client.BaseAddress = new Uri("https://bank.gov.ua/");
+                client.Timeout = TimeSpan.FromSeconds(15);
+            });
             var app = builder.Build();
 
             using (var scope = app.Services.CreateScope())
             {
+                var gameStore = scope.ServiceProvider.GetRequiredService<GameStore>();
+                await gameStore.Database.MigrateAsync();
+
                 var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<int>>>();
                 string[] roles = { "Admin", "User", "Publisher" };
 
@@ -89,6 +121,8 @@ namespace Tokito
                         await roleManager.CreateAsync(new IdentityRole<int>(role));
                     }
                 }
+
+                await PricingMarketSeeder.SeedAsync(gameStore);
             }
 
 

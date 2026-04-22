@@ -23,13 +23,20 @@ namespace Tokito.Controllers
 
                 var username = User.Identity.Name;
                 var countryCode = User.FindFirst("countryCode")?.Value;
+                var publisherId = User.FindFirst("PublisherId")?.Value;
+                var roles = User.FindAll(ClaimTypes.Role)
+                    .Select(claim => claim.Value)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
 
                 return Ok(new
                 {
                     id = userId,
                     email = email,
                     username = username,
-                    countryCode = countryCode
+                    countryCode = countryCode,
+                    publisherId = publisherId,
+                    roles = roles
                 });
             }
             return Unauthorized();

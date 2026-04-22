@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Tokito.Data;
 using Tokito.DTOs.UserDTOs;
 using Tokito.Models;
+using Tokito.Services.Markets;
 
 namespace Tokito.Services.Auth
 {
@@ -14,23 +15,35 @@ namespace Tokito.Services.Auth
         private readonly UserManager<User> _userManager;
         private readonly SignInManager<User> _signInManager;
         private readonly GameStore _gameStore;
+        private readonly IMarketResolver _marketResolver;
 
-        public AuthService(UserManager<User> userManager, SignInManager<User> signInManager, GameStore gameStore)
+        public AuthService(
+            UserManager<User> userManager,
+            SignInManager<User> signInManager,
+            GameStore gameStore,
+            IMarketResolver marketResolver)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _gameStore = gameStore;
+            _marketResolver = marketResolver;
         }
 
         public async Task<IdentityResult> RegisterUserAsync(UserRegistrationDTO dto)
         {
+            var duplicateEmailResult = await ValidateUniqueEmailAsync(dto.Email);
+            if (duplicateEmailResult != null)
+            {
+                return duplicateEmailResult;
+            }
+
             var user = new User
             {
                 UserName = dto.UserNickname,
                 UserNickname = dto.UserNickname,
                 Email = dto.Email,
                 RegistrationDate = DateOnly.FromDateTime(DateTime.Now),
-                AccountStatus = 1,
+                AccountStatus = UserAccountStatusValues.Active,
                 CountryCode = dto.CountryCode.Trim().ToUpperInvariant(),
             };
 
@@ -42,16 +55,184 @@ namespace Tokito.Services.Auth
             return result;
         }
 
+        public async Task<IdentityResult> RegisterPublisherAsync(PublisherRegistrationDTO dto)
+        {
+            var duplicateEmailResult = await ValidateUniqueEmailAsync(dto.Email);
+            if (duplicateEmailResult != null)
+            {
+                return duplicateEmailResult;
+            }
+
+            var normalizedCountryCode = dto.CountryCode.Trim().ToUpperInvariant();
+
+            var user = new User
+            {
+                UserName = dto.UserNickname,
+                UserNickname = dto.UserNickname,
+                Email = dto.Email,
+                RegistrationDate = DateOnly.FromDateTime(DateTime.Now),
+                AccountStatus = UserAccountStatusValues.Active,
+                CountryCode = normalizedCountryCode,
+            };
+
+            await using var transaction = await _gameStore.Database.BeginTransactionAsync();
+
+            var result = await _userManager.CreateAsync(user, dto.Password);
+            if (!result.Succeeded)
+            {
+                await transaction.RollbackAsync();
+                return result;
+            }
+
+            var roleResult = await _userManager.AddToRolesAsync(user, ["User", "Publisher"]);
+            if (!roleResult.Succeeded)
+            {
+                await transaction.RollbackAsync();
+                return roleResult;
+            }
+
+            _gameStore.Publishers.Add(new Publisher
+            {
+                Name = dto.PublisherName.Trim(),
+                FoundationDate = dto.FoundationDate,
+                Website = string.IsNullOrWhiteSpace(dto.Website) ? null : dto.Website.Trim(),
+                CountryCode = normalizedCountryCode,
+                UserId = user.Id
+            });
+
+            await _gameStore.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return IdentityResult.Success;
+        }
+
         public async Task<SignInResult> LoginAsync(UserLoginDTO dto)
         {
-            var user = await _userManager.FindByEmailAsync(dto.Email);
+            if (string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
+            {
+                return SignInResult.Failed;
+            }
+
+            var normalizedEmail = _userManager.NormalizeEmail(dto.Email);
+            if (string.IsNullOrWhiteSpace(normalizedEmail))
+            {
+                return SignInResult.Failed;
+            }
+
+            var matchingUsers = await _gameStore.Users
+                .Where(currentUser => currentUser.NormalizedEmail == normalizedEmail)
+                .OrderBy(currentUser => currentUser.Id)
+                .Take(2)
+                .ToListAsync();
+
+            if (matchingUsers.Count > 1)
+            {
+                throw new InvalidOperationException("Multiple accounts share this email address. Remove duplicate users before logging in.");
+            }
+
+            var user = matchingUsers.SingleOrDefault();
             if (user == null) return SignInResult.Failed;
+            if (user.AccountStatus == UserAccountStatusValues.Blocked) return SignInResult.NotAllowed;
 
             var passwordValid = await _userManager.CheckPasswordAsync(user, dto.Password);
             if (!passwordValid) return SignInResult.Failed;
 
             await SignInUserAsync(user);
             return SignInResult.Success;
+        }
+
+        public async Task UpdateAccountStatusAsync(int userId, byte accountStatus)
+        {
+            if (accountStatus is < UserAccountStatusValues.Active or > UserAccountStatusValues.Blocked)
+            {
+                throw new ArgumentOutOfRangeException(nameof(accountStatus), "Unsupported account status.");
+            }
+
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null)
+            {
+                throw new KeyNotFoundException("User account was not found.");
+            }
+
+            user.AccountStatus = accountStatus;
+            var result = await _userManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                throw new InvalidOperationException(string.Join(" ", result.Errors.Select(error => error.Description)));
+            }
+        }
+
+        public async Task<DeleteUserResultDto> DeleteUserAsync(int userId)
+        {
+            await using var transaction = await _gameStore.Database.BeginTransactionAsync();
+
+            var user = await _gameStore.Users
+                .Include(currentUser => currentUser.Games)
+                .SingleOrDefaultAsync(currentUser => currentUser.Id == userId);
+
+            if (user == null)
+            {
+                throw new KeyNotFoundException("User account was not found.");
+            }
+
+            var publisher = await _gameStore.Publishers
+                .SingleOrDefaultAsync(currentPublisher => currentPublisher.UserId == userId);
+
+            if (publisher != null)
+            {
+                var ownsGames = await _gameStore.Games
+                    .AnyAsync(game => game.PublisherId == publisher.PublisherId);
+
+                if (ownsGames)
+                {
+                    throw new InvalidOperationException("Cannot delete a publisher account that still owns games.");
+                }
+            }
+
+            user.Games.Clear();
+
+            var walletEntries = await _gameStore.WalletEntries
+                .Where(entry => entry.UserId == userId)
+                .ToListAsync();
+            _gameStore.WalletEntries.RemoveRange(walletEntries);
+
+            var transactions = await _gameStore.Transactions
+                .Where(currentTransaction => currentTransaction.UserId == userId)
+                .ToListAsync();
+            _gameStore.Transactions.RemoveRange(transactions);
+
+            var reviews = await _gameStore.GameReviews
+                .Where(review => review.UserId == userId)
+                .ToListAsync();
+            _gameStore.GameReviews.RemoveRange(reviews);
+
+            var walletBalances = await _gameStore.WalletBalances
+                .Where(balance => balance.UserId == userId)
+                .ToListAsync();
+            _gameStore.WalletBalances.RemoveRange(walletBalances);
+
+            if (publisher != null)
+            {
+                _gameStore.Publishers.Remove(publisher);
+            }
+
+            await _gameStore.SaveChangesAsync();
+
+            var deleteResult = await _userManager.DeleteAsync(user);
+            if (!deleteResult.Succeeded)
+            {
+                await transaction.RollbackAsync();
+                throw new InvalidOperationException(string.Join(" ", deleteResult.Errors.Select(error => error.Description)));
+            }
+
+            await transaction.CommitAsync();
+
+            return new DeleteUserResultDto
+            {
+                UserId = userId,
+                WasPublisherAccount = publisher != null,
+                PublisherId = publisher?.PublisherId
+            };
         }
 
         public async Task<ChangeCountryResultDto> ChangeCountryAsync(int userId, ChangeCountryDto dto)
@@ -72,8 +253,8 @@ namespace Tokito.Services.Auth
                 throw new InvalidOperationException("User account was not found.");
 
             var previousCountryCode = user.CountryCode.Trim().ToUpperInvariant();
-            var previousCurrencyCode = await ResolveWalletCurrencyCodeAsync(previousCountryCode);
-            var newCurrencyCode = await ResolveWalletCurrencyCodeAsync(normalizedCountryCode);
+            var previousCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(previousCountryCode);
+            var newCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(normalizedCountryCode);
 
             var balance = await _gameStore.WalletBalances.SingleOrDefaultAsync(b => b.UserId == userId);
             var previousBalance = balance?.AvailableAmount ?? 0m;
@@ -174,21 +355,33 @@ namespace Tokito.Services.Auth
             await _signInManager.SignInWithClaimsAsync(user, isPersistent: false, claims);
         }
 
-        private async Task<string> ResolveWalletCurrencyCodeAsync(string? countryCode)
+        private async Task<IdentityResult?> ValidateUniqueEmailAsync(string? email)
         {
-            if (string.IsNullOrWhiteSpace(countryCode))
-                return BaseCurrencyCode;
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                return null;
+            }
 
-            var normalizedCountryCode = countryCode.Trim().ToUpperInvariant();
-            var walletCurrencyCode = await _gameStore.Regions
+            var normalizedEmail = _userManager.NormalizeEmail(email);
+            if (string.IsNullOrWhiteSpace(normalizedEmail))
+            {
+                return null;
+            }
+
+            var emailAlreadyExists = await _gameStore.Users
                 .AsNoTracking()
-                .Where(region => region.CountryCode == normalizedCountryCode && region.IsSupported)
-                .Select(region => region.CurrencyCode)
-                .FirstOrDefaultAsync();
+                .AnyAsync(user => user.NormalizedEmail == normalizedEmail);
 
-            return string.IsNullOrWhiteSpace(walletCurrencyCode)
-                ? BaseCurrencyCode
-                : walletCurrencyCode.Trim().ToUpperInvariant();
+            if (!emailAlreadyExists)
+            {
+                return null;
+            }
+
+            return IdentityResult.Failed(new IdentityError
+            {
+                Code = nameof(IdentityErrorDescriber.DuplicateEmail),
+                Description = "Email is already taken."
+            });
         }
 
         private static void ValidateExchangeRate(decimal? exchangeRate, string paramName)

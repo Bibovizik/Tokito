@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Tokito.Data;
 using Tokito.DTOs.WalletDTOs;
 using Tokito.Models;
+using Tokito.Services.Markets;
 
 namespace Tokito.Services.Wallets
 {
@@ -10,10 +11,12 @@ namespace Tokito.Services.Wallets
         private const string BaseCurrencyCode = "UAH";
 
         private readonly GameStore _gameStore;
+        private readonly IMarketResolver _marketResolver;
 
-        public WalletService(GameStore gameStore)
+        public WalletService(GameStore gameStore, IMarketResolver marketResolver)
         {
             _gameStore = gameStore;
+            _marketResolver = marketResolver;
         }
 
         public async Task<WalletSummaryDto> GetWalletAsync(int userId)
@@ -122,24 +125,7 @@ namespace Tokito.Services.Wallets
                 .Select(user => user.CountryCode)
                 .SingleOrDefaultAsync();
 
-            return await ResolveWalletCurrencyCodeAsync(countryCode);
-        }
-
-        private async Task<string> ResolveWalletCurrencyCodeAsync(string? countryCode)
-        {
-            if (string.IsNullOrWhiteSpace(countryCode))
-                return BaseCurrencyCode;
-
-            var normalizedCountryCode = countryCode.Trim().ToUpperInvariant();
-            var walletCurrencyCode = await _gameStore.Regions
-                .AsNoTracking()
-                .Where(region => region.CountryCode == normalizedCountryCode && region.IsSupported)
-                .Select(region => region.CurrencyCode)
-                .FirstOrDefaultAsync();
-
-            return string.IsNullOrWhiteSpace(walletCurrencyCode)
-                ? BaseCurrencyCode
-                : walletCurrencyCode.Trim().ToUpperInvariant();
+            return await _marketResolver.ResolveWalletCurrencyCodeAsync(countryCode);
         }
     }
 }

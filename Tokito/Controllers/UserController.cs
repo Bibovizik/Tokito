@@ -38,19 +38,35 @@ namespace Tokito.Controllers
             return result.Succeeded ? Ok() : BadRequest(result.Errors);
         }
         [AllowAnonymous]
+        [HttpPost("register-publisher")]
+        public async Task<IActionResult> RegisterPublisher([FromBody] PublisherRegistrationDTO publisherRegistrationDTO)
+        {
+            var result = await _authService.RegisterPublisherAsync(publisherRegistrationDTO);
+            return result.Succeeded ? Ok() : BadRequest(result.Errors);
+        }
+        [AllowAnonymous]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserLoginDTO userLoginDTO)
         {
-            var result = await _authService.LoginAsync(userLoginDTO);
-            if (result.Succeeded)
+            try
             {
-                return Ok(new { message = "Login successful" });
+                var result = await _authService.LoginAsync(userLoginDTO);
+                if (result.Succeeded)
+                {
+                    return Ok(new { message = "Login successful" });
+                }
+
+                if (result.IsLockedOut)
+                    return StatusCode(423, "Account locked");
+                if (result.IsNotAllowed)
+                    return StatusCode(423, new { message = "Account is blocked" });
+
+                return Unauthorized(new { message = "Invalid email or password" });
             }
-
-            if (result.IsLockedOut)
-                return StatusCode(423, "Account locked");
-
-            return Unauthorized(new { message = "Invalid email or password" });
+            catch (InvalidOperationException exception)
+            {
+                return Conflict(new { message = exception.Message });
+            }
         }
 
         [Authorize]
@@ -80,6 +96,48 @@ namespace Tokito.Controllers
             catch (InvalidOperationException exception)
             {
                 return NotFound(new { message = exception.Message });
+            }
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPut("{userId:int}/account-status")]
+        public async Task<IActionResult> UpdateAccountStatus([FromRoute] int userId, [FromBody] UpdateAccountStatusDto dto)
+        {
+            try
+            {
+                await _authService.UpdateAccountStatusAsync(userId, dto.AccountStatus);
+                return Ok(new { userId, accountStatus = dto.AccountStatus });
+            }
+            catch (ArgumentOutOfRangeException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Conflict(new { message = exception.Message });
+            }
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpDelete("{userId:int}")]
+        public async Task<IActionResult> DeleteUser([FromRoute] int userId)
+        {
+            try
+            {
+                var result = await _authService.DeleteUserAsync(userId);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Conflict(new { message = exception.Message });
             }
         }
     }

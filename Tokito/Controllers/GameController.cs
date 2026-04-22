@@ -1,11 +1,10 @@
-﻿using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
-using Tokito.Services.Auth;
 using Tokito.Services.Games;
 using Tokito.Services.Statuses.GameStatuses;
 
@@ -15,15 +14,51 @@ namespace Tokito.Controllers
     [Route("api/games")]
     public class GameController : ControllerBase
     {
-        public IGameService _gameService;
-        public IMapper _mapper;
-        public GameController(IGameService gameService, IMapper mapper)
+        private readonly IGameService _gameService;
+
+        public GameController(IGameService gameService)
         {
             _gameService = gameService;
-            _mapper = mapper;
         }
+
+        [Authorize(Roles = "Publisher,Admin")]
+        [HttpGet("dashboard")]
+        public async Task<IActionResult> GetDashboard(
+            [FromQuery] DateOnly? dateFrom,
+            [FromQuery] DateOnly? dateTo,
+            [FromQuery] int? gameId,
+            [FromQuery] int? publisherId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var dashboard = await _gameService.GetDashboardAsync(
+                    GetPublisherId(),
+                    User.IsInRole("Admin"),
+                    dateFrom,
+                    dateTo,
+                    gameId,
+                    publisherId,
+                    cancellationToken);
+
+                return Ok(dashboard);
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
+        }
+
         [EndpointDescription("Search game by id in route")]
-        [HttpGet("{id}")]
+        [HttpGet("{id:int}")]
         public async Task<IActionResult> GetGameById([FromRoute] int id, [FromQuery] string? countryCode = null)
         {
             var userId = TryGetCurrentUserId();
@@ -33,34 +68,120 @@ namespace Tokito.Controllers
             {
                 return NotFound();
             }
+
             return Ok(game);
         }
+
+        [Authorize(Roles = "Publisher")]
+        [HttpPost]
+        [EndpointDescription("Create a game and seed prices for all supported pricing markets")]
+        public async Task<IActionResult> CreateGame([FromBody] CreateGameDto dto, CancellationToken cancellationToken)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var publisherId = GetPublisherId();
+            if (!publisherId.HasValue)
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                var createdGame = await _gameService.CreateGameAsync(publisherId.Value, dto, cancellationToken);
+                return CreatedAtAction(nameof(GetGameById), new { id = createdGame.GameId }, createdGame);
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
+            catch (HttpRequestException exception)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = exception.Message });
+            }
+        }
+
+        [Authorize(Roles = "Publisher")]
+        [HttpPut("{id:int}")]
+        public async Task<IActionResult> UpdateGame([FromRoute] int id, [FromBody] UpdateGameDto dto, CancellationToken cancellationToken)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var publisherId = GetPublisherId();
+            if (!publisherId.HasValue)
+            {
+                return Forbid();
+            }
+
+            try
+            {
+                var updatedGame = await _gameService.UpdateGameAsync(id, publisherId.Value, dto, cancellationToken);
+                return Ok(updatedGame);
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(new { message = exception.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
+            catch (HttpRequestException exception)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = exception.Message });
+            }
+        }
+
         [Authorize(Roles = "User")]
-        [HttpPost("createReview/{gameId}")]
+        [HttpPost("createReview/{gameId:int}")]
         [EndpointDescription("Post a review for a game")]
         public async Task<IActionResult> PostGameReview([FromRoute] int gameId, [FromBody] CreateReviewDto reviewDto)
         {
             if (!ModelState.IsValid)
+            {
                 return BadRequest(ModelState);
+            }
 
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-            if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+            var userId = TryGetCurrentUserId();
+            if (!userId.HasValue)
             {
                 return Unauthorized("Invalid user token.");
             }
-            var result = await _gameService.AddReviewAsync(userId, gameId, reviewDto);
+
+            var result = await _gameService.AddReviewAsync(userId.Value, gameId, reviewDto);
 
             if (result.Status == ReviewStatus.AlreadyReviewed)
+            {
                 return BadRequest(result);
+            }
 
             return Ok("Success");
         }
 
         [Authorize]
-        [HttpPost("{gameId}/purchase")]
+        [HttpPost("{gameId:int}/purchase")]
         [EndpointDescription("Buy game by id")]
-
         public async Task<IActionResult> PurchaseGame([FromRoute] int gameId)
         {
             var userId = TryGetCurrentUserId();
@@ -87,20 +208,22 @@ namespace Tokito.Controllers
 
         [HttpGet]
         [Description("Get all games, can pass genre as a query")]
-        public async Task<IActionResult> GetGamesByGenres([FromQuery] string? genre)
+        public async Task<IActionResult> GetGamesByGenres([FromQuery] string? genre, [FromQuery] string? countryCode = null)
         {
-            var filteredGames = await _gameService.GetGamesByGenresAsync(genre);
-            if (filteredGames is null) return NotFound();
+            var filteredGames = await _gameService.GetGamesByGenresAsync(
+                genre,
+                TryGetCurrentUserId(),
+                User.FindFirst("countryCode")?.Value ?? countryCode);
+
             return Ok(filteredGames);
         }
+
         [Authorize(Roles = "Publisher, Admin")]
         [HttpDelete]
-        public async Task<IActionResult> DeleteGameByIdAsync([FromBody] int id)
+        public async Task<IActionResult> DeleteGameByIdAsync([FromBody, Required] int id)
         {
             var isUserAdmin = User.IsInRole("Admin");
-
-            var publisherIdClaim = User.FindFirst("PublisherId")?.Value;
-            int.TryParse(publisherIdClaim, out var publisherId);
+            var publisherId = GetPublisherId() ?? 0;
 
             var result = await _gameService.DeleteGameByIdAsync(id, publisherId, isUserAdmin);
 
@@ -114,16 +237,25 @@ namespace Tokito.Controllers
                 };
             }
 
-            return Ok(new { Message = $"Deleted game with id: {id}", });
+            return Ok(new { Message = $"Deleted game with id: {id}" });
         }
+
         private int? TryGetCurrentUserId()
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            return int.TryParse(userIdString, out int userId)
+            return int.TryParse(userIdString, out var userId)
                 ? userId
                 : null;
         }
 
-    };
+        private int? GetPublisherId()
+        {
+            var publisherIdClaim = User.FindFirst("PublisherId")?.Value;
+
+            return int.TryParse(publisherIdClaim, out var publisherId)
+                ? publisherId
+                : null;
+        }
+    }
 }
