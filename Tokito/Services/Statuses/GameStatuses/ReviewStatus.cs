@@ -6,5 +6,6 @@
         GameNotFound = 2,
         UserNotFound = 3,
         AlreadyReviewed = 4,
+        GameNotOwned = 5
     }
 }

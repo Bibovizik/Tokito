@@ -11,6 +11,8 @@ namespace Tokito.Services.Auth
 
         Task<SignInResult> LoginAsync(UserLoginDTO dto);
 
+        Task<UserProfileDto> GetProfileAsync(int userId);
+
         Task<ChangeCountryResultDto> ChangeCountryAsync(int userId, ChangeCountryDto dto);
 
         Task UpdateAccountStatusAsync(int userId, byte accountStatus);

@@ -15,6 +15,8 @@ public class GameDashboardDto
     public IReadOnlyCollection<GameDashboardGameSummaryDto> Games { get; set; } = Array.Empty<GameDashboardGameSummaryDto>();
 
     public IReadOnlyCollection<GameDashboardDailyPointDto> Daily { get; set; } = Array.Empty<GameDashboardDailyPointDto>();
+
+    public GameDashboardAdminOverviewDto? AdminOverview { get; set; }
 }
 
 public class GameDashboardTotalsDto
@@ -44,4 +46,23 @@ public class GameDashboardDailyPointDto
     public decimal RevenueUah { get; set; }
 
     public int CopiesSold { get; set; }
+}
+
+public class GameDashboardAdminOverviewDto
+{
+    public int TotalUsers { get; set; }
+
+    public int ActiveUsers { get; set; }
+
+    public int BlockedUsers { get; set; }
+
+    public int TotalPublishers { get; set; }
+
+    public int TotalGames { get; set; }
+
+    public int TotalReviews { get; set; }
+
+    public int TotalPurchases { get; set; }
+
+    public int TotalLibraryEntries { get; set; }
 }

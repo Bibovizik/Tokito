@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Tokito.Data;
 using Tokito.DTOs.UserDTOs;
 using Tokito.Models;
+using Tokito.Services.Games;
 using Tokito.Services.Markets;
 
 namespace Tokito.Services.Auth
@@ -141,6 +142,44 @@ namespace Tokito.Services.Auth
             return SignInResult.Success;
         }
 
+        public async Task<UserProfileDto> GetProfileAsync(int userId)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null)
+            {
+                throw new KeyNotFoundException("User account was not found.");
+            }
+
+            var publisher = await _gameStore.Publishers
+                .AsNoTracking()
+                .Where(currentPublisher => currentPublisher.UserId == userId)
+                .Select(currentPublisher => new
+                {
+                    currentPublisher.PublisherId,
+                    currentPublisher.Name
+                })
+                .SingleOrDefaultAsync();
+
+            var roles = await _userManager.GetRolesAsync(user);
+
+            return new UserProfileDto
+            {
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                UserNickname = user.UserNickname,
+                Email = user.Email,
+                CountryCode = user.CountryCode,
+                RegistrationDate = user.RegistrationDate,
+                AccountStatusCode = user.AccountStatus,
+                AccountStatus = ResolveAccountStatusName(user.AccountStatus),
+                PublisherId = publisher?.PublisherId,
+                PublisherName = publisher?.Name,
+                Roles = roles
+                    .OrderBy(role => role)
+                    .ToArray()
+            };
+        }
+
         public async Task UpdateAccountStatusAsync(int userId, byte accountStatus)
         {
             if (accountStatus is < UserAccountStatusValues.Active or > UserAccountStatusValues.Blocked)
@@ -204,6 +243,10 @@ namespace Tokito.Services.Auth
             var reviews = await _gameStore.GameReviews
                 .Where(review => review.UserId == userId)
                 .ToListAsync();
+            var reviewedGameIds = reviews
+                .Select(review => review.GameId)
+                .Distinct()
+                .ToList();
             _gameStore.GameReviews.RemoveRange(reviews);
 
             var walletBalances = await _gameStore.WalletBalances
@@ -224,6 +267,8 @@ namespace Tokito.Services.Auth
                 await transaction.RollbackAsync();
                 throw new InvalidOperationException(string.Join(" ", deleteResult.Errors.Select(error => error.Description)));
             }
+
+            await RecalculateGameRatingsAsync(reviewedGameIds);
 
             await transaction.CommitAsync();
 
@@ -401,6 +446,48 @@ namespace Tokito.Services.Auth
             return exchangeRateToUah ?? throw new ArgumentException(
                 $"Exchange rate to UAH is required for {currencyCode}.",
                 paramName);
+        }
+
+        private async Task RecalculateGameRatingsAsync(IReadOnlyCollection<int> gameIds)
+        {
+            if (gameIds.Count == 0)
+            {
+                return;
+            }
+
+            var averageScoresByGameId = await _gameStore.GameReviews
+                .AsNoTracking()
+                .Where(review => gameIds.Contains(review.GameId))
+                .GroupBy(review => review.GameId)
+                .Select(group => new
+                {
+                    GameId = group.Key,
+                    AverageScore = group.Average(review => (decimal)review.Score)
+                })
+                .ToDictionaryAsync(group => group.GameId, group => group.AverageScore);
+
+            var affectedGames = await _gameStore.Games
+                .Where(game => gameIds.Contains(game.GameId))
+                .ToListAsync();
+
+            foreach (var affectedGame in affectedGames)
+            {
+                affectedGame.Rating = averageScoresByGameId.TryGetValue(affectedGame.GameId, out var averageScore)
+                    ? GameRatingCalculator.Calculate(averageScore)
+                    : null;
+            }
+
+            await _gameStore.SaveChangesAsync();
+        }
+
+        private static string ResolveAccountStatusName(byte accountStatus)
+        {
+            return accountStatus switch
+            {
+                UserAccountStatusValues.Active => "Active",
+                UserAccountStatusValues.Blocked => "Blocked",
+                _ => "Unknown"
+            };
         }
     }
 }

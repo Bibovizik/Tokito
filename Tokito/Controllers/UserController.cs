@@ -22,6 +22,27 @@ namespace Tokito.Controllers
             return Ok("Hi!");
         }
 
+        [Authorize]
+        [HttpGet("profile")]
+        public async Task<IActionResult> GetProfile()
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrWhiteSpace(userIdString) || !int.TryParse(userIdString, out var userId))
+            {
+                return Unauthorized("Invalid user token.");
+            }
+
+            try
+            {
+                var profile = await _authService.GetProfileAsync(userId);
+                return Ok(profile);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
+        }
+
         [Authorize(Roles = "Admin")]
         [HttpGet("testAdmin")]
         public IActionResult TestingAdmin()

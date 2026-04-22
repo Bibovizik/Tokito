@@ -72,6 +72,25 @@ namespace Tokito.Controllers
             return Ok(game);
         }
 
+        [Authorize]
+        [HttpGet("library")]
+        [EndpointDescription("Get purchased games for the current user")]
+        public async Task<IActionResult> GetLibrary([FromQuery] string? genre = null)
+        {
+            var userId = TryGetCurrentUserId();
+            if (!userId.HasValue)
+            {
+                return Unauthorized("Invalid user token.");
+            }
+
+            var libraryGames = await _gameService.GetLibraryAsync(
+                userId.Value,
+                genre,
+                User.FindFirst("countryCode")?.Value);
+
+            return Ok(libraryGames);
+        }
+
         [Authorize(Roles = "Publisher")]
         [HttpPost]
         [EndpointDescription("Create a game and seed prices for all supported pricing markets")]
@@ -174,6 +193,21 @@ namespace Tokito.Controllers
             if (result.Status == ReviewStatus.AlreadyReviewed)
             {
                 return BadRequest(result);
+            }
+
+            if (result.Status == ReviewStatus.GameNotFound)
+            {
+                return NotFound(result);
+            }
+
+            if (result.Status == ReviewStatus.UserNotFound)
+            {
+                return Unauthorized(result);
+            }
+
+            if (result.Status == ReviewStatus.GameNotOwned)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, result);
             }
 
             return Ok("Success");

@@ -33,8 +33,32 @@ namespace Tokito.Services.Games
 
         public async Task<ReviewResult> AddReviewAsync(int userId, int gameId, CreateReviewDto dto)
         {
-            var userHasReviewedGame = await _gameStore.GameReviews
-                .AnyAsync(gr => gr.UserId == userId && gr.GameId == gameId);
+            var userExists = await _gameStore.Users
+                .AsNoTracking()
+                .AnyAsync(user => user.Id == userId);
+
+            if (!userExists)
+            {
+                return ReviewResult.Failure(ReviewStatus.UserNotFound, "User account was not found.");
+            }
+
+            var game = await _gameStore.Games
+                .Include(currentGame => currentGame.GameReviews)
+                .SingleOrDefaultAsync(currentGame => currentGame.GameId == gameId);
+
+            if (game == null)
+            {
+                return ReviewResult.Failure(ReviewStatus.GameNotFound, "Game was not found.");
+            }
+
+            var isOwnedByUser = await IsOwnedByUserAsync(userId, gameId);
+            if (!isOwnedByUser)
+            {
+                return ReviewResult.Failure(ReviewStatus.GameNotOwned, "Only users who own this game can review it.");
+            }
+
+            var userHasReviewedGame = game.GameReviews
+                .Any(review => review.UserId == userId);
 
             if (userHasReviewedGame)
             {
@@ -50,7 +74,9 @@ namespace Tokito.Services.Games
                 RatedAt = DateTime.UtcNow
             };
 
-            _gameStore.GameReviews.Add(newReview);
+            game.GameReviews.Add(newReview);
+            game.Rating = GameRatingCalculator.Calculate(game.GameReviews.Select(review => review.Score));
+
             await _gameStore.SaveChangesAsync();
             return ReviewResult.Success();
         }
@@ -114,6 +140,54 @@ namespace Tokito.Services.Games
                     walletCurrencyCode,
                     ownedGameIds.Contains(game.GameId),
                     includeReviews: false))
+                .ToList();
+        }
+
+        public async Task<List<GameViewDTO>> GetLibraryAsync(int userId, string? genre = null, string? countryCode = null)
+        {
+            var purchasesByGameId = await _gameStore.Transactions
+                .AsNoTracking()
+                .Where(transaction => transaction.UserId == userId)
+                .GroupBy(transaction => transaction.GameId)
+                .Select(group => new
+                {
+                    GameId = group.Key,
+                    PurchasedAt = group.Max(transaction => transaction.PurchaseDate)
+                })
+                .ToDictionaryAsync(group => group.GameId, group => group.PurchasedAt);
+
+            var query = _gameStore.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .SelectMany(user => user.Games)
+                .Include(game => game.Genres)
+                .Include(game => game.RegionalPrices)
+                    .ThenInclude(price => price.Region)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(genre))
+            {
+                query = query.Where(game => game.Genres.Any(currentGenre => currentGenre.Name == genre));
+            }
+
+            var games = await query
+                .OrderBy(game => game.GameId)
+                .ToListAsync();
+
+            var effectiveCountryCode = await ResolveEffectiveCountryCodeAsync(userId, countryCode);
+            var storefrontRegion = await _marketResolver.ResolveSupportedRegionAsync(effectiveCountryCode);
+            var walletCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(effectiveCountryCode);
+
+            return games
+                .Select(game => MapGameViewDto(
+                    game,
+                    storefrontRegion,
+                    walletCurrencyCode,
+                    isOwnedByCurrentUser: true,
+                    includeReviews: false,
+                    purchasesByGameId.TryGetValue(game.GameId, out var purchasedAt) ? purchasedAt : null))
+                .OrderByDescending(game => game.PurchasedAt)
+                .ThenBy(game => game.gameId)
                 .ToList();
         }
 
@@ -327,7 +401,10 @@ namespace Tokito.Services.Games
                     GameCount = gameSummaries.Count
                 },
                 Games = gameSummaries,
-                Daily = daily
+                Daily = daily,
+                AdminOverview = isUserAdmin
+                    ? await BuildAdminOverviewAsync(cancellationToken)
+                    : null
             };
         }
 
@@ -479,7 +556,8 @@ namespace Tokito.Services.Games
             Region? storefrontRegion,
             string? walletCurrencyCode,
             bool isOwnedByCurrentUser,
-            bool includeReviews)
+            bool includeReviews,
+            DateTime? purchasedAt = null)
         {
             var storefrontPrice = ResolveStorefrontPrice(game, storefrontRegion);
             var walletPrice = ResolveWalletPrice(game, walletCurrencyCode, storefrontPrice);
@@ -519,7 +597,8 @@ namespace Tokito.Services.Games
                 BasePriceUah = game.BasePriceUah,
                 CurrentPrice = MapPriceDto(storefrontPrice),
                 WalletPrice = walletPrice == null ? null : MapPriceDto(walletPrice),
-                IsOwnedByCurrentUser = isOwnedByCurrentUser
+                IsOwnedByCurrentUser = isOwnedByCurrentUser,
+                PurchasedAt = purchasedAt
             };
         }
 
@@ -571,6 +650,38 @@ namespace Tokito.Services.Games
                 ExchangeRateToUahSnapshot = price.ExchangeRateToUahSnapshot,
                 ExchangeDate = price.ExchangeDate,
                 IsActive = true
+            };
+        }
+
+        private async Task<GameDashboardAdminOverviewDto> BuildAdminOverviewAsync(CancellationToken cancellationToken)
+        {
+            return new GameDashboardAdminOverviewDto
+            {
+                TotalUsers = await _gameStore.Users
+                    .AsNoTracking()
+                    .CountAsync(cancellationToken),
+                ActiveUsers = await _gameStore.Users
+                    .AsNoTracking()
+                    .CountAsync(user => user.AccountStatus == UserAccountStatusValues.Active, cancellationToken),
+                BlockedUsers = await _gameStore.Users
+                    .AsNoTracking()
+                    .CountAsync(user => user.AccountStatus == UserAccountStatusValues.Blocked, cancellationToken),
+                TotalPublishers = await _gameStore.Publishers
+                    .AsNoTracking()
+                    .CountAsync(cancellationToken),
+                TotalGames = await _gameStore.Games
+                    .AsNoTracking()
+                    .CountAsync(cancellationToken),
+                TotalReviews = await _gameStore.GameReviews
+                    .AsNoTracking()
+                    .CountAsync(cancellationToken),
+                TotalPurchases = await _gameStore.Transactions
+                    .AsNoTracking()
+                    .CountAsync(cancellationToken),
+                TotalLibraryEntries = await _gameStore.Users
+                    .AsNoTracking()
+                    .SelectMany(user => user.Games)
+                    .CountAsync(cancellationToken)
             };
         }
 

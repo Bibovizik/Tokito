@@ -10,6 +10,8 @@ namespace Tokito.Services.Games
 
         Task<List<GameViewDTO>> GetGamesByGenresAsync(string? genre, int? userId = null, string? countryCode = null);
 
+        Task<List<GameViewDTO>> GetLibraryAsync(int userId, string? genre = null, string? countryCode = null);
+
         Task<CreatedGameDto> CreateGameAsync(int publisherId, CreateGameDto dto, CancellationToken cancellationToken = default);
 
         Task<CreatedGameDto> UpdateGameAsync(int gameId, int publisherId, UpdateGameDto dto, CancellationToken cancellationToken = default);

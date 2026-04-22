@@ -39,5 +39,7 @@ namespace Tokito.DTOs.GameDTOs
         public GamePriceDto? WalletPrice { get; set; }
 
         public bool IsOwnedByCurrentUser { get; set; }
+
+        public DateTime? PurchasedAt { get; set; }
     }
 }
