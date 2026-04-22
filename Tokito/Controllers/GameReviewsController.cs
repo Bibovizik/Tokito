@@ -21,10 +21,14 @@ namespace Tokito.Controllers
         [EndpointDescription("Get all reviews for a game")]
         public async Task<IActionResult> GetGameReviewsByid([FromRoute] int id)
         {
+
+            if (id <= 0) return BadRequest("Invalid Game ID.");
+
             var reviews = await _gameReviewService.GetGameReviewsById(id);
-            if (reviews.Count == 0)
+
+            if (reviews == null)
             {
-                return NotFound("No Reviews were found for this game");
+                return NotFound($"No reviews found for Game ID {id}.");
             }
             return Ok(reviews);
         }
