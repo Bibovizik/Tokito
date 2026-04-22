@@ -25,8 +25,6 @@ namespace Tokito.Services.Games
             int? publisherId,
             CancellationToken cancellationToken = default);
 
-        Task<ReviewResult> AddReviewAsync(int userId, int gameId, CreateReviewDto dto);
-
         Task<PurchaseGameResult> PurchaseGameAsync(int userId, int gameId);
 
         Task<DeleteGameResult> DeleteGameByIdAsync(int gameId, int userId, bool isUserAdmin);

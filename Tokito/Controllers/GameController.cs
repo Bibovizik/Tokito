@@ -172,46 +172,7 @@ namespace Tokito.Controllers
             }
         }
 
-        [Authorize(Roles = "User")]
-        [HttpPost("createReview/{gameId:int}")]
-        [EndpointDescription("Post a review for a game")]
-        public async Task<IActionResult> PostGameReview([FromRoute] int gameId, [FromBody] CreateReviewDto reviewDto)
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            var userId = TryGetCurrentUserId();
-            if (!userId.HasValue)
-            {
-                return Unauthorized("Invalid user token.");
-            }
-
-            var result = await _gameService.AddReviewAsync(userId.Value, gameId, reviewDto);
-
-            if (result.Status == ReviewStatus.AlreadyReviewed)
-            {
-                return BadRequest(result);
-            }
-
-            if (result.Status == ReviewStatus.GameNotFound)
-            {
-                return NotFound(result);
-            }
-
-            if (result.Status == ReviewStatus.UserNotFound)
-            {
-                return Unauthorized(result);
-            }
-
-            if (result.Status == ReviewStatus.GameNotOwned)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, result);
-            }
-
-            return Ok("Success");
-        }
+        
 
         [Authorize]
         [HttpPost("{gameId:int}/purchase")]
