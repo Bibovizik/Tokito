@@ -1,6 +1,6 @@
 using Tokito.DTOs.GameDTOs;
 
-namespace Tokito.Services.Games
+namespace Tokito.Services.Statuses.GameStatuses
 {
     public class PurchaseGameResult
     {

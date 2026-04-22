@@ -1,4 +1,4 @@
-namespace Tokito.Services.Games
+namespace Tokito.Services.Statuses.GameStatuses
 {
     public enum PurchaseGameStatus
     {

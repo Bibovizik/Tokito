@@ -1,16 +1,9 @@
 
 using AutoMapper;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
-using System.Text;
 using Tokito.Data;
-using Tokito.DTOs.GameDTOs;
 using Tokito.Mappers;
 using Tokito.Models;
 using Tokito.Services.Auth;
@@ -39,8 +32,10 @@ namespace Tokito
             builder.Services.ConfigureApplicationCookie(options =>
             {
                 options.Cookie.HttpOnly = true;
-                options.Cookie.SecurePolicy = CookieSecurePolicy.Always; 
-                options.Cookie.SameSite = SameSiteMode.None; 
+                options.Cookie.IsEssential = true;
+                options.Cookie.Path = "/";
+                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                options.Cookie.SameSite = SameSiteMode.None;
                 options.Cookie.Name = "Tokito-Identity";
 
                 options.Events.OnRedirectToLogin = context =>
@@ -48,8 +43,14 @@ namespace Tokito
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     return Task.CompletedTask;
                 };
+
+                options.Events.OnRedirectToAccessDenied = context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                };
             });
-           
+
 
             builder.Services.AddDbContext<GameStore>(options =>
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -61,7 +62,9 @@ namespace Tokito
                     {
                         policy.WithOrigins(
                             "http://localhost:3000",
-                            "http://localhost:5173"
+                            "https://localhost:3000",
+                            "http://localhost:5173",
+                            "https://localhost:5173"
                         )
                         .AllowAnyHeader()
                         .AllowAnyMethod()
@@ -74,19 +77,19 @@ namespace Tokito
             builder.Services.AddScoped<IWalletService, WalletService>();
             var app = builder.Build();
 
-            //using (var scope = app.Services.CreateScope())
-            //{
-            //    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<int>>>();
-            //    string[] roles = { "Admin", "User" };
+            using (var scope = app.Services.CreateScope())
+            {
+                var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<int>>>();
+                string[] roles = { "Admin", "User", "Publisher" };
 
-            //    foreach (var role in roles)
-            //    {
-            //        if (!await roleManager.RoleExistsAsync(role))
-            //        {
-            //            await roleManager.CreateAsync(new IdentityRole<int>(role));
-            //        }
-            //    }
-            //}
+                foreach (var role in roles)
+                {
+                    if (!await roleManager.RoleExistsAsync(role))
+                    {
+                        await roleManager.CreateAsync(new IdentityRole<int>(role));
+                    }
+                }
+            }
 
 
             if (app.Environment.IsDevelopment())
@@ -106,7 +109,6 @@ namespace Tokito
             app.UseAuthorization();
             app.MapControllers();
 
-            app.MapGameEndpoints();
             app.UseStaticFiles();
             app.Run();
         }

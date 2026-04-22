@@ -1,11 +1,13 @@
 ﻿using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel;
 using System.Security.Claims;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Services.Auth;
 using Tokito.Services.Games;
+using Tokito.Services.Statuses.GameStatuses;
 
 namespace Tokito.Controllers
 {
@@ -20,6 +22,7 @@ namespace Tokito.Controllers
             _gameService = gameService;
             _mapper = mapper;
         }
+        [EndpointDescription("Search game by id in route")]
         [HttpGet("{id}")]
         public async Task<IActionResult> GetGameById([FromRoute] int id, [FromQuery] string? countryCode = null)
         {
@@ -34,6 +37,7 @@ namespace Tokito.Controllers
         }
         [Authorize(Roles = "User")]
         [HttpPost("createReview/{gameId}")]
+        [EndpointDescription("Post a review for a game")]
         public async Task<IActionResult> PostGameReview([FromRoute] int gameId, [FromBody] CreateReviewDto reviewDto)
         {
             if (!ModelState.IsValid)
@@ -47,7 +51,7 @@ namespace Tokito.Controllers
             }
             var result = await _gameService.AddReviewAsync(userId, gameId, reviewDto);
 
-            if (result == 0)
+            if (result.Status == ReviewStatus.AlreadyReviewed)
                 return BadRequest(result);
 
             return Ok("Success");
@@ -55,6 +59,8 @@ namespace Tokito.Controllers
 
         [Authorize]
         [HttpPost("{gameId}/purchase")]
+        [EndpointDescription("Buy game by id")]
+
         public async Task<IActionResult> PurchaseGame([FromRoute] int gameId)
         {
             var userId = TryGetCurrentUserId();
@@ -79,14 +85,37 @@ namespace Tokito.Controllers
             };
         }
 
-        [HttpGet("genres/{genre}")]
-        public async Task<IActionResult> GetGamesByGenres([FromRoute] string genre)
+        [HttpGet]
+        [Description("Get all games, can pass genre as a query")]
+        public async Task<IActionResult> GetGamesByGenres([FromQuery] string? genre)
         {
             var filteredGames = await _gameService.GetGamesByGenresAsync(genre);
             if (filteredGames is null) return NotFound();
             return Ok(filteredGames);
         }
+        [Authorize(Roles = "Publisher, Admin")]
+        [HttpDelete]
+        public async Task<IActionResult> DeleteGameByIdAsync([FromBody] int id)
+        {
+            var isUserAdmin = User.IsInRole("Admin");
 
+            var publisherIdClaim = User.FindFirst("PublisherId")?.Value;
+            int.TryParse(publisherIdClaim, out var publisherId);
+
+            var result = await _gameService.DeleteGameByIdAsync(id, publisherId, isUserAdmin);
+
+            if (!result.IsSuccess)
+            {
+                return result.Status switch
+                {
+                    DeleteGameStatus.GameNotFound => NotFound(result.Message),
+                    DeleteGameStatus.InsufficientRights => Forbid(),
+                    _ => BadRequest(result.Message)
+                };
+            }
+
+            return Ok(new { Message = $"Deleted game with id: {id}", });
+        }
         private int? TryGetCurrentUserId()
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);

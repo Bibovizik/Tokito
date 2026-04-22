@@ -4,6 +4,7 @@ using Tokito.Data;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Models;
+using Tokito.Services.Statuses.GameStatuses;
 
 namespace Tokito.Services.Games
 {
@@ -21,8 +22,13 @@ namespace Tokito.Services.Games
             _gameStore = gameStore;
         }
 
-        public async Task<int> AddReviewAsync(int userId, int gameId, CreateReviewDto dto)
+        public async Task<ReviewResult> AddReviewAsync(int userId, int gameId, CreateReviewDto dto)
         {
+            var UserHasReviewedGame = _gameStore.GameReviews.Where(gr => gr.UserId == userId && gr.GameId == gameId).Any();
+            if (UserHasReviewedGame)
+            {
+                return ReviewResult.Failure(ReviewStatus.AlreadyReviewed, "User has already reviewed this game!");
+            }
             var newReview = new GameReview
             {
                 UserId = userId,
@@ -33,7 +39,8 @@ namespace Tokito.Services.Games
             };
 
             _gameStore.GameReviews.Add(newReview);
-            return await _gameStore.SaveChangesAsync();
+            await _gameStore.SaveChangesAsync();
+            return ReviewResult.Success();
         }
 
         public async Task<GameViewDTO?> GetGameByIdAsync(int id, int? userId = null, string? countryCode = null)
@@ -66,19 +73,21 @@ namespace Tokito.Services.Games
             return dto;
         }
 
-        public Task<IReadOnlyCollection<Game>> GetGamesAsync()
+        public async Task<List<GameViewDTO>> GetGamesByGenresAsync(string? genre)
         {
-            throw new NotImplementedException();
-        }
+            var query = _gameStore.Games
+                .AsNoTracking()
+                .Include(g => g.Genres)
+                .AsQueryable();
 
-        public async Task<List<GameViewDTO>> GetGamesByGenresAsync(string genre)
-        {
-            var filteredGames = await _gameStore.Games
-                .Include(game => game.Genres)
-                .Where(game => game.Genres.Any(g => g.Name == genre))
-                .ToListAsync();
+            if (!string.IsNullOrWhiteSpace(genre))
+            {
+                query = query.Where(game => game.Genres.Any(g => g.Name == genre));
+            }
 
-            return _mapper.Map<List<GameViewDTO>>(filteredGames);
+            var games = await query.ToListAsync();
+
+            return _mapper.Map<List<GameViewDTO>>(games);
         }
 
         public async Task<PurchaseGameResult> PurchaseGameAsync(int userId, int gameId)
@@ -342,6 +351,34 @@ namespace Tokito.Services.Games
                 CurrencySymbol = resolvedPrice.CurrencySymbol,
                 Source = resolvedPrice.Source
             };
+        }
+
+        public async Task<DeleteGameResult> DeleteGameByIdAsync(int gameId, int publisherId, bool isUserAdmin)
+        {
+            var gameToBeDeleted = await _gameStore.Games
+                .FirstOrDefaultAsync(g => g.GameId == gameId);
+
+            if (gameToBeDeleted == null)
+            {
+                return DeleteGameResult.Failure(DeleteGameStatus.GameNotFound, "Game not found.");
+            }
+
+            // 2. Check Permissions
+            // If not an admin, the PublisherId MUST match the owner of the game
+            if (!isUserAdmin && gameToBeDeleted.PublisherId != publisherId)
+            {
+                return DeleteGameResult.Failure(DeleteGameStatus.InsufficientRights, "Nuh-uh, you can't delete someone else's game.");
+            }
+
+            // 3. Delete
+            _gameStore.Games.Remove(gameToBeDeleted);
+            await _gameStore.SaveChangesAsync();
+
+            return DeleteGameResult.Success(new DeleteGameResultDto
+            {
+                DeleteInitializerId = publisherId,
+                GameId = gameId
+            });
         }
 
         private sealed record ResolvedGamePrice(

@@ -155,12 +155,23 @@ namespace Tokito.Services.Auth
 
         private async Task SignInUserAsync(User user)
         {
-            await _signInManager.SignInWithClaimsAsync(
-                user,
-                isPersistent: false,
-                [
+            // 1. Find if this user is a publisher
+            var publisher = await _gameStore.Publishers
+                .FirstOrDefaultAsync(p => p.UserId == user.Id);
+
+            var claims = new List<Claim>
+                {
                     new Claim("countryCode", user.CountryCode.Trim().ToUpperInvariant())
-                ]);
+                };
+
+            // 2. If they are a publisher, add that ID to their claims
+            if (publisher != null)
+            {
+                claims.Add(new Claim("PublisherId", publisher.PublisherId.ToString()));
+                claims.Add(new Claim(ClaimTypes.Role, "Publisher"));
+            }
+
+            await _signInManager.SignInWithClaimsAsync(user, isPersistent: false, claims);
         }
 
         private async Task<string> ResolveWalletCurrencyCodeAsync(string? countryCode)
