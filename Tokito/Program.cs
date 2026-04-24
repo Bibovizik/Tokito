@@ -8,6 +8,7 @@ using Tokito.Data;
 using Tokito.Mappers;
 using Tokito.Models;
 using Tokito.Services.Auth;
+using Tokito.Services.DataInitialization;
 using Tokito.Services.GameImages;
 using Tokito.Services.GameReviews;
 using Tokito.Services.Games;
@@ -103,6 +104,7 @@ namespace Tokito
             builder.Services.AddScoped<IMarketResolver, MarketResolver>();
             builder.Services.AddScoped<IWalletService, WalletService>();
             builder.Services.AddScoped<IGameReviewService, GameReviewService>();
+            builder.Services.AddScoped<IDataInitializationService, DataInitializationService>();
             builder.Services.AddHttpClient<INbuExchangeRateService, NbuExchangeRateService>(client =>
             {
                 client.BaseAddress = new Uri("https://bank.gov.ua/");

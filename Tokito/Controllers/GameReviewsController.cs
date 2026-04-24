@@ -1,6 +1,7 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
+using Tokito.DTOs.Common;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Services.GameReviews;
 using Tokito.Services.Statuses.GameStatuses;
@@ -11,27 +12,36 @@ namespace Tokito.Controllers
     [Route("api/gameReviews")]
     public class GameReviewsController : ControllerBase
     {
-        IGameReviewService _gameReviewService;
-        public GameReviewsController(IGameReviewService gameReviewService) 
+        private readonly IGameReviewService _gameReviewService;
+
+        public GameReviewsController(IGameReviewService gameReviewService)
         {
             _gameReviewService = gameReviewService;
         }
 
         [HttpGet("{id}")]
         [EndpointDescription("Get all reviews for a game")]
-        public async Task<IActionResult> GetGameReviewsByid([FromRoute] int id)
+        public async Task<IActionResult> GetGameReviewsByid([FromRoute] int id, [FromQuery] PaginationQueryDto? pagination = null)
         {
+            if (id <= 0)
+            {
+                return BadRequest("Invalid Game ID.");
+            }
 
-            if (id <= 0) return BadRequest("Invalid Game ID.");
+            if (pagination?.IsSpecified == true)
+            {
+                var pagedReviews = await _gameReviewService.GetGameReviewsByIdPagedAsync(
+                    id,
+                    pagination.ResolvedPage,
+                    pagination.ResolvedPageSize);
+
+                return Ok(pagedReviews);
+            }
 
             var reviews = await _gameReviewService.GetGameReviewsById(id);
-
-            if (reviews == null)
-            {
-                return NotFound($"No reviews found for Game ID {id}.");
-            }
             return Ok(reviews);
         }
+
         [Authorize(Roles = "User")]
         [HttpPost("{gameId:int}")]
         [EndpointDescription("Post a review for a game")]
@@ -72,6 +82,7 @@ namespace Tokito.Controllers
 
             return Ok("Success");
         }
+
         private int? TryGetCurrentUserId()
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);

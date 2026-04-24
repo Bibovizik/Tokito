@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Http;
+using Tokito.DTOs.Common;
 using Tokito.DTOs.GameDTOs;
-using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Services.Statuses.GameStatuses;
 
 namespace Tokito.Services.Games
@@ -11,7 +11,21 @@ namespace Tokito.Services.Games
 
         Task<List<GameViewDTO>> GetGamesByGenresAsync(string? genre, int? userId = null, string? countryCode = null);
 
+        Task<PagedResultDto<GameViewDTO>> GetGamesByGenresPagedAsync(
+            string? genre,
+            int page,
+            int pageSize,
+            int? userId = null,
+            string? countryCode = null);
+
         Task<List<GameViewDTO>> GetLibraryAsync(int userId, string? genre = null, string? countryCode = null);
+
+        Task<PagedResultDto<GameViewDTO>> GetLibraryPagedAsync(
+            int userId,
+            int page,
+            int pageSize,
+            string? genre = null,
+            string? countryCode = null);
 
         Task<CreatedGameDto> CreateGameAsync(
             int publisherId,

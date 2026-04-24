@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Text.Json;
+using Tokito.DTOs.Common;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Services.Games;
@@ -76,12 +77,24 @@ namespace Tokito.Controllers
         [Authorize]
         [HttpGet("library")]
         [EndpointDescription("Get purchased games for the current user")]
-        public async Task<IActionResult> GetLibrary([FromQuery] string? genre = null)
+        public async Task<IActionResult> GetLibrary([FromQuery] string? genre = null, [FromQuery] PaginationQueryDto? pagination = null)
         {
             var userId = TryGetCurrentUserId();
             if (!userId.HasValue)
             {
                 return Unauthorized("Invalid user token.");
+            }
+
+            if (pagination?.IsSpecified == true)
+            {
+                var pagedLibraryGames = await _gameService.GetLibraryPagedAsync(
+                    userId.Value,
+                    pagination.ResolvedPage,
+                    pagination.ResolvedPageSize,
+                    genre,
+                    User.FindFirst("countryCode")?.Value);
+
+                return Ok(pagedLibraryGames);
             }
 
             var libraryGames = await _gameService.GetLibraryAsync(
@@ -226,8 +239,23 @@ namespace Tokito.Controllers
 
         [HttpGet]
         [Description("Get all games, can pass genre as a query")]
-        public async Task<IActionResult> GetGamesByGenres([FromQuery] string? genre, [FromQuery] string? countryCode = null)
+        public async Task<IActionResult> GetGamesByGenres(
+            [FromQuery] string? genre,
+            [FromQuery] string? countryCode = null,
+            [FromQuery] PaginationQueryDto? pagination = null)
         {
+            if (pagination?.IsSpecified == true)
+            {
+                var pagedGames = await _gameService.GetGamesByGenresPagedAsync(
+                    genre,
+                    pagination.ResolvedPage,
+                    pagination.ResolvedPageSize,
+                    TryGetCurrentUserId(),
+                    User.FindFirst("countryCode")?.Value ?? countryCode);
+
+                return Ok(pagedGames);
+            }
+
             var filteredGames = await _gameService.GetGamesByGenresAsync(
                 genre,
                 TryGetCurrentUserId(),

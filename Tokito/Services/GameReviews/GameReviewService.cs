@@ -1,7 +1,6 @@
-﻿
 using Microsoft.EntityFrameworkCore;
-using System.Threading;
 using Tokito.Data;
+using Tokito.DTOs.Common;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.Models;
 using Tokito.Services.Games;
@@ -11,26 +10,39 @@ namespace Tokito.Services.GameReviews
 {
     public class GameReviewService : IGameReviewService
     {
-        GameStore _gameStore;
+        private readonly GameStore _gameStore;
+
         public GameReviewService(GameStore gameStore)
         {
             _gameStore = gameStore;
         }
+
         public async Task<List<GameReviewViewDTO>> GetGameReviewsById(int id)
         {
-            return await _gameStore.GameReviews
-                .AsNoTracking()
-                .Where(r => r.GameId == id)
-                .Select(review => new GameReviewViewDTO
-                {
-                    UserId = review.UserId,
-                    UserName = review.User.UserNickname,
-                    Score = review.Score,
-                    Review = review.Review,
-                    RatedAt = review.RatedAt
-                })
-                .ToListAsync();
+            return await BuildGameReviewQuery(id).ToListAsync();
         }
+
+        public async Task<PagedResultDto<GameReviewViewDTO>> GetGameReviewsByIdPagedAsync(int id, int page, int pageSize)
+        {
+            var query = BuildGameReviewQuery(id);
+            var totalCount = await query.CountAsync();
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedResultDto<GameReviewViewDTO>
+            {
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalCount == 0
+                    ? 0
+                    : (int)Math.Ceiling(totalCount / (double)pageSize),
+                Items = items
+            };
+        }
+
         public async Task<ReviewResult> PostGameReviewById(int userId, int gameId, CreateReviewDto dto)
         {
             var userExists = await _gameStore.Users
@@ -80,6 +92,7 @@ namespace Tokito.Services.GameReviews
             await _gameStore.SaveChangesAsync();
             return ReviewResult.Success();
         }
+
         public async Task<bool> IsOwnedByUserAsync(int userId, int gameId)
         {
             return await _gameStore.Users
@@ -87,6 +100,23 @@ namespace Tokito.Services.GameReviews
                 .Where(user => user.Id == userId)
                 .SelectMany(user => user.Games)
                 .AnyAsync(game => game.GameId == gameId);
+        }
+
+        private IQueryable<GameReviewViewDTO> BuildGameReviewQuery(int gameId)
+        {
+            return _gameStore.GameReviews
+                .AsNoTracking()
+                .Where(review => review.GameId == gameId)
+                .OrderByDescending(review => review.RatedAt)
+                .ThenBy(review => review.UserId)
+                .Select(review => new GameReviewViewDTO
+                {
+                    UserId = review.UserId,
+                    UserName = review.User.UserNickname,
+                    Score = review.Score,
+                    Review = review.Review,
+                    RatedAt = review.RatedAt
+                });
         }
     }
 }

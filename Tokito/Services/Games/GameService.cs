@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Tokito.Data;
+using Tokito.DTOs.Common;
 using Tokito.DTOs.GameDTOs;
 using Tokito.DTOs.GameReviewDTOs;
 using Tokito.DTOs.Genres;
@@ -99,6 +100,60 @@ namespace Tokito.Services.Games
                 .ToList();
         }
 
+        public async Task<PagedResultDto<GameViewDTO>> GetGamesByGenresPagedAsync(
+            string? genre,
+            int page,
+            int pageSize,
+            int? userId = null,
+            string? countryCode = null)
+        {
+            var query = _gameStore.Games
+                .AsNoTracking()
+                .Include(g => g.Genres)
+                .Include(g => g.RegionalPrices)
+                    .ThenInclude(price => price.Region)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(genre))
+            {
+                query = query.Where(game => game.Genres.Any(currentGenre => currentGenre.Name == genre));
+            }
+
+            var totalCount = await query.CountAsync();
+            var games = await query
+                .OrderBy(game => game.GameId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var effectiveCountryCode = await ResolveEffectiveCountryCodeAsync(userId, countryCode);
+            var storefrontRegion = await _marketResolver.ResolveSupportedRegionAsync(effectiveCountryCode);
+            var walletCurrencyCode = userId.HasValue
+                ? await _marketResolver.ResolveWalletCurrencyCodeAsync(effectiveCountryCode)
+                : null;
+            var ownedGameIds = userId.HasValue
+                ? await GetOwnedGameIdsAsync(userId.Value)
+                : new HashSet<int>();
+
+            return new PagedResultDto<GameViewDTO>
+            {
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalCount == 0
+                    ? 0
+                    : (int)Math.Ceiling(totalCount / (double)pageSize),
+                Items = games
+                    .Select(game => MapGameViewDto(
+                        game,
+                        storefrontRegion,
+                        walletCurrencyCode,
+                        ownedGameIds.Contains(game.GameId),
+                        includeReviews: false))
+                    .ToList()
+            };
+        }
+
         public async Task<List<GameViewDTO>> GetLibraryAsync(int userId, string? genre = null, string? countryCode = null)
         {
             var purchasesByGameId = await _gameStore.Transactions
@@ -145,6 +200,72 @@ namespace Tokito.Services.Games
                 .OrderByDescending(game => game.PurchasedAt)
                 .ThenBy(game => game.gameId)
                 .ToList();
+        }
+
+        public async Task<PagedResultDto<GameViewDTO>> GetLibraryPagedAsync(
+            int userId,
+            int page,
+            int pageSize,
+            string? genre = null,
+            string? countryCode = null)
+        {
+            var purchasesByGameId = await _gameStore.Transactions
+                .AsNoTracking()
+                .Where(transaction => transaction.UserId == userId)
+                .GroupBy(transaction => transaction.GameId)
+                .Select(group => new
+                {
+                    GameId = group.Key,
+                    PurchasedAt = group.Max(transaction => transaction.PurchaseDate)
+                })
+                .ToDictionaryAsync(group => group.GameId, group => group.PurchasedAt);
+
+            var query = _gameStore.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .SelectMany(user => user.Games)
+                .Include(game => game.Genres)
+                .Include(game => game.RegionalPrices)
+                    .ThenInclude(price => price.Region)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(genre))
+            {
+                query = query.Where(game => game.Genres.Any(currentGenre => currentGenre.Name == genre));
+            }
+
+            var totalCount = await query.CountAsync();
+            var games = await query
+                .OrderBy(game => game.GameId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var effectiveCountryCode = await ResolveEffectiveCountryCodeAsync(userId, countryCode);
+            var storefrontRegion = await _marketResolver.ResolveSupportedRegionAsync(effectiveCountryCode);
+            var walletCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(effectiveCountryCode);
+            var items = games
+                .Select(game => MapGameViewDto(
+                    game,
+                    storefrontRegion,
+                    walletCurrencyCode,
+                    isOwnedByCurrentUser: true,
+                    includeReviews: false,
+                    purchasesByGameId.TryGetValue(game.GameId, out var purchasedAt) ? purchasedAt : null))
+                .OrderByDescending(game => game.PurchasedAt)
+                .ThenBy(game => game.gameId)
+                .ToList();
+
+            return new PagedResultDto<GameViewDTO>
+            {
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalCount == 0
+                    ? 0
+                    : (int)Math.Ceiling(totalCount / (double)pageSize),
+                Items = items
+            };
         }
 
         public async Task<CreatedGameDto> CreateGameAsync(

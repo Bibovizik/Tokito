@@ -1,0 +1,212 @@
+{
+  "genres": [
+    {
+      "name": "Action",
+      "description": "Fast-paced games centered around combat or movement."
+    },
+    {
+      "name": "Adventure",
+      "description": "Story-driven exploration and progression."
+    },
+    {
+      "name": "Strategy",
+      "description": "Planning-heavy games with tactical decisions."
+    },
+    {
+      "name": "RPG",
+      "description": "Character growth, builds, and long-form progression."
+    },
+    {
+      "name": "Indie",
+      "description": "Smaller-scope titles with a distinct creative angle."
+    },
+    {
+      "name": "Simulation",
+      "description": "Systems-focused titles that model real or invented activities."
+    }
+  ],
+  "publishers": [
+    {
+      "userNickname": "northforge",
+      "email": "seed.publisher1@tokito.local",
+      "countryCode": "UA",
+      "publisherName": "North Forge Studio",
+      "foundationDate": "2019-04-12",
+      "website": "https://northforge.example",
+      "games": [
+        {
+          "name": "Signal District",
+          "releaseDate": "2024-09-15",
+          "systemRequirements": {
+            "os": "Windows 10",
+            "ramGb": 8,
+            "gpu": "GTX 1060"
+          },
+          "mostOneTimePlayers": 1,
+          "description": "A compact urban action game focused on fast traversal and short story arcs.",
+          "basePriceUah": 449,
+          "imageUrl": "1.jpg",
+          "genreNames": ["Action", "Adventure", "Indie"],
+          "marketPriceOverrides": [
+            { "marketCode": "US", "amount": 11.99 },
+            { "marketCode": "PL", "amount": 49.99 }
+          ]
+        },
+        {
+          "name": "Cold Relay",
+          "releaseDate": "2025-02-07",
+          "systemRequirements": {
+            "os": "Windows 11",
+            "ramGb": 16,
+            "gpu": "RTX 2060"
+          },
+          "mostOneTimePlayers": 4,
+          "description": "Co-op tactical missions with short replayable operations and procedural events.",
+          "basePriceUah": 699,
+          "imageUrl": "2.jpg",
+          "genreNames": ["Action", "Strategy"],
+          "marketPriceOverrides": [
+            { "marketCode": "US", "amount": 17.99 },
+            { "marketCode": "GB", "amount": 14.99 }
+          ]
+        },
+        {
+          "name": "Archive Zero",
+          "releaseDate": "2023-11-01",
+          "systemRequirements": {
+            "os": "Windows 10",
+            "ramGb": 8,
+            "gpu": "GTX 970"
+          },
+          "mostOneTimePlayers": 1,
+          "description": "A mystery exploration game set inside a failing digital archive.",
+          "basePriceUah": 379,
+          "imageUrl": "3.jpg",
+          "genreNames": ["Adventure", "Indie"],
+          "marketPriceOverrides": []
+        }
+      ]
+    },
+    {
+      "userNickname": "emberworks",
+      "email": "seed.publisher2@tokito.local",
+      "countryCode": "PL",
+      "publisherName": "Ember Works",
+      "foundationDate": "2017-06-03",
+      "website": "https://emberworks.example",
+      "games": [
+        {
+          "name": "Iron Orchard",
+          "releaseDate": "2022-06-20",
+          "systemRequirements": {
+            "os": "Windows 10",
+            "ramGb": 12,
+            "gpu": "GTX 1660"
+          },
+          "mostOneTimePlayers": 1,
+          "description": "A colony builder where industrial growth collides with ecological constraints.",
+          "basePriceUah": 529,
+          "imageUrl": "4.jpg",
+          "genreNames": ["Strategy", "Simulation", "Indie"],
+          "marketPriceOverrides": [
+            { "marketCode": "EU", "amount": 13.49 }
+          ]
+        },
+        {
+          "name": "Glass Caravan",
+          "releaseDate": "2025-01-28",
+          "systemRequirements": {
+            "os": "Windows 11",
+            "ramGb": 16,
+            "gpu": "RTX 2070"
+          },
+          "mostOneTimePlayers": 1,
+          "description": "A party-based desert RPG with route planning, trading, and tactical encounters.",
+          "basePriceUah": 799,
+          "imageUrl": "5.jpg",
+          "genreNames": ["RPG", "Adventure", "Strategy"],
+          "marketPriceOverrides": [
+            { "marketCode": "US", "amount": 19.99 },
+            { "marketCode": "CA", "amount": 26.99 }
+          ]
+        },
+        {
+          "name": "Circuit Steward",
+          "releaseDate": "2024-03-11",
+          "systemRequirements": {
+            "os": "Windows 10",
+            "ramGb": 8,
+            "gpu": "GTX 1050 Ti"
+          },
+          "mostOneTimePlayers": 1,
+          "description": "A maintenance sim about balancing robotics uptime, budgets, and shifting client demands.",
+          "basePriceUah": 339,
+          "imageUrl": "6.jpg",
+          "genreNames": ["Simulation", "Strategy"],
+          "marketPriceOverrides": []
+        }
+      ]
+    },
+    {
+      "userNickname": "hinterbyte",
+      "email": "seed.publisher3@tokito.local",
+      "countryCode": "CA",
+      "publisherName": "Hinterbyte Labs",
+      "foundationDate": "2020-01-19",
+      "website": "https://hinterbyte.example",
+      "games": [
+        {
+          "name": "Pine Sector",
+          "releaseDate": "2024-12-05",
+          "systemRequirements": {
+            "os": "Windows 11",
+            "ramGb": 16,
+            "gpu": "RTX 3060"
+          },
+          "mostOneTimePlayers": 1,
+          "description": "A survival-action campaign about securing remote stations in hostile weather.",
+          "basePriceUah": 739,
+          "imageUrl": "7.jpg",
+          "genreNames": ["Action", "RPG"],
+          "marketPriceOverrides": [
+            { "marketCode": "US", "amount": 18.99 },
+            { "marketCode": "JP", "amount": 2680 }
+          ]
+        },
+        {
+          "name": "Mercury Span",
+          "releaseDate": "2023-08-18",
+          "systemRequirements": {
+            "os": "Windows 10",
+            "ramGb": 8,
+            "gpu": "GTX 1060"
+          },
+          "mostOneTimePlayers": 8,
+          "description": "A tactical skirmish game with small squads and fast asynchronous turns.",
+          "basePriceUah": 489,
+          "imageUrl": "8.jpg",
+          "genreNames": ["Strategy", "Action"],
+          "marketPriceOverrides": [
+            { "marketCode": "GB", "amount": 10.99 },
+            { "marketCode": "TR", "amount": 169.99 }
+          ]
+        },
+        {
+          "name": "Lantern Vale",
+          "releaseDate": "2022-10-30",
+          "systemRequirements": {
+            "os": "Windows 10",
+            "ramGb": 8,
+            "gpu": "GTX 960"
+          },
+          "mostOneTimePlayers": 1,
+          "description": "A low-pressure exploration RPG built around quests, crafting, and village restoration.",
+          "basePriceUah": 429,
+          "imageUrl": "9.jpg",
+          "genreNames": ["RPG", "Adventure", "Indie"],
+          "marketPriceOverrides": []
+        }
+      ]
+    }
+  ]
+}
