@@ -63,9 +63,13 @@ namespace Tokito.Controllers
             {
                 return BadRequest(new { message = exception.Message });
             }
-            catch (InvalidOperationException exception)
+            catch (KeyNotFoundException exception)
             {
                 return NotFound(new { message = exception.Message });
+            }
+            catch (HttpRequestException exception)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = exception.Message });
             }
         }
 

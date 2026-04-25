@@ -7,23 +7,33 @@ using Tokito.Data;
 using Tokito.DTOs.UserDTOs;
 using Tokito.Models;
 using Tokito.Services.Games;
+using Tokito.Services.Markets;
+using Tokito.Services.Pricing;
 
 namespace Tokito.Services.Auth
 {
     public class AuthService : IAuthService
     {
+        private const string BaseCurrencyCode = "UAH";
+
         private readonly UserManager<User> _userManager;
         private readonly SignInManager<User> _signInManager;
         private readonly GameStore _gameStore;
+        private readonly IMarketResolver _marketResolver;
+        private readonly INbuExchangeRateService _nbuExchangeRateService;
 
         public AuthService(
             UserManager<User> userManager,
             SignInManager<User> signInManager,
-            GameStore gameStore)
+            GameStore gameStore,
+            IMarketResolver marketResolver,
+            INbuExchangeRateService nbuExchangeRateService)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _gameStore = gameStore;
+            _marketResolver = marketResolver;
+            _nbuExchangeRateService = nbuExchangeRateService;
         }
 
         public async Task<IdentityResult> RegisterUserAsync(UserRegistrationDTO dto)
@@ -281,18 +291,22 @@ namespace Tokito.Services.Auth
             if (string.IsNullOrWhiteSpace(dto.CountryCode))
                 throw new ArgumentException("Country code is required.", nameof(dto.CountryCode));
 
-            ValidateExchangeRate(dto.CurrentCurrencyExchangeRateToUahSnapshot, nameof(dto.CurrentCurrencyExchangeRateToUahSnapshot));
-            ValidateExchangeRate(dto.NewCurrencyExchangeRateToUahSnapshot, nameof(dto.NewCurrencyExchangeRateToUahSnapshot));
             var normalizedCountryCode = dto.CountryCode.Trim().ToUpperInvariant();
+            var rateSnapshot = await ResolveChangeCountryRateSnapshotAsync(userId, normalizedCountryCode);
 
             try
             {
-                var result = await ExecuteChangeCountryProcedureAsync(userId, normalizedCountryCode, dto);
+                var result = await ExecuteChangeCountryProcedureAsync(
+                    userId,
+                    normalizedCountryCode,
+                    rateSnapshot.CurrentCurrencyExchangeRateToUahSnapshot,
+                    rateSnapshot.NewCurrencyExchangeRateToUahSnapshot,
+                    dto.Description);
 
                 var updatedUser = await _userManager.FindByIdAsync(userId.ToString());
                 if (updatedUser == null)
                 {
-                    throw new InvalidOperationException("User account was not found.");
+                    throw new KeyNotFoundException("User account was not found.");
                 }
 
                 await SignInUserAsync(updatedUser);
@@ -300,7 +314,7 @@ namespace Tokito.Services.Auth
             }
             catch (SqlException exception) when (exception.Number == 50014)
             {
-                throw new InvalidOperationException("User account was not found.");
+                throw new KeyNotFoundException("User account was not found.");
             }
             catch (SqlException exception) when (exception.Number is 50015 or 50016)
             {
@@ -363,7 +377,12 @@ namespace Tokito.Services.Auth
             });
         }
 
-        private async Task<ChangeCountryResultDto> ExecuteChangeCountryProcedureAsync(int userId, string normalizedCountryCode, ChangeCountryDto dto)
+        private async Task<ChangeCountryResultDto> ExecuteChangeCountryProcedureAsync(
+            int userId,
+            string normalizedCountryCode,
+            decimal? currentCurrencyExchangeRateToUahSnapshot,
+            decimal? newCurrencyExchangeRateToUahSnapshot,
+            string? description)
         {
             var connection = _gameStore.Database.GetDbConnection();
             var shouldCloseConnection = connection.State != ConnectionState.Open;
@@ -381,9 +400,9 @@ namespace Tokito.Services.Auth
 
                 command.Parameters.Add(CreateSqlParameter("@UserId", userId));
                 command.Parameters.Add(CreateSqlParameter("@NewCountryCode", normalizedCountryCode));
-                command.Parameters.Add(CreateSqlParameter("@CurrentCurrencyExchangeRateToUahSnapshot", dto.CurrentCurrencyExchangeRateToUahSnapshot));
-                command.Parameters.Add(CreateSqlParameter("@NewCurrencyExchangeRateToUahSnapshot", dto.NewCurrencyExchangeRateToUahSnapshot));
-                command.Parameters.Add(CreateSqlParameter("@Description", string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim()));
+                command.Parameters.Add(CreateSqlParameter("@CurrentCurrencyExchangeRateToUahSnapshot", currentCurrencyExchangeRateToUahSnapshot));
+                command.Parameters.Add(CreateSqlParameter("@NewCurrencyExchangeRateToUahSnapshot", newCurrencyExchangeRateToUahSnapshot));
+                command.Parameters.Add(CreateSqlParameter("@Description", string.IsNullOrWhiteSpace(description) ? null : description.Trim()));
 
                 await using var reader = await command.ExecuteReaderAsync();
                 if (!await reader.ReadAsync())
@@ -412,18 +431,70 @@ namespace Tokito.Services.Auth
             }
         }
 
-        private static void ValidateExchangeRate(decimal? exchangeRate, string paramName)
+        private async Task<ChangeCountryRateSnapshot> ResolveChangeCountryRateSnapshotAsync(int userId, string normalizedCountryCode)
         {
-            if (exchangeRate.HasValue &&
-                (exchangeRate.Value < 0.00001m || exchangeRate.Value > 999_999_999m))
+            var previousCountryCode = await _gameStore.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .Select(user => user.CountryCode)
+                .SingleOrDefaultAsync();
+
+            if (string.IsNullOrWhiteSpace(previousCountryCode))
             {
-                throw new ArgumentOutOfRangeException(paramName, "Exchange rate must be positive.");
+                throw new KeyNotFoundException("User account was not found.");
             }
+
+            var previousCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(previousCountryCode);
+            var newCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(normalizedCountryCode);
+
+            if (string.Equals(previousCurrencyCode, newCurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return new ChangeCountryRateSnapshot(null, null);
+            }
+
+            var nonBaseCurrencies = new[] { previousCurrencyCode, newCurrencyCode }
+                .Where(currencyCode => !string.Equals(currencyCode, BaseCurrencyCode, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            IReadOnlyDictionary<string, ExchangeRateQuote> exchangeRates = new Dictionary<string, ExchangeRateQuote>(StringComparer.OrdinalIgnoreCase);
+            if (nonBaseCurrencies.Length > 0)
+            {
+                try
+                {
+                    exchangeRates = await _nbuExchangeRateService.GetRatesToUahAsync();
+                }
+                catch (InvalidOperationException exception)
+                {
+                    throw new HttpRequestException(exception.Message, exception);
+                }
+            }
+
+            return new ChangeCountryRateSnapshot(
+                ResolveRateToUahSnapshot(previousCurrencyCode, exchangeRates),
+                ResolveRateToUahSnapshot(newCurrencyCode, exchangeRates));
         }
 
         private static SqlParameter CreateSqlParameter(string name, object? value)
         {
             return new SqlParameter(name, value ?? DBNull.Value);
+        }
+
+        private static decimal? ResolveRateToUahSnapshot(
+            string currencyCode,
+            IReadOnlyDictionary<string, ExchangeRateQuote> exchangeRates)
+        {
+            if (string.Equals(currencyCode, BaseCurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (!exchangeRates.TryGetValue(currencyCode.Trim().ToUpperInvariant(), out var exchangeRateQuote))
+            {
+                throw new HttpRequestException($"NBU exchange rate for {currencyCode} is unavailable.");
+            }
+
+            return exchangeRateQuote.RateToUah;
         }
 
         private async Task RecalculateGameRatingsAsync(IReadOnlyCollection<int> gameIds)
@@ -467,5 +538,9 @@ namespace Tokito.Services.Auth
                 _ => "Unknown"
             };
         }
+
+        private sealed record ChangeCountryRateSnapshot(
+            decimal? CurrentCurrencyExchangeRateToUahSnapshot,
+            decimal? NewCurrencyExchangeRateToUahSnapshot);
     }
 }
