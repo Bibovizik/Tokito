@@ -12,6 +12,7 @@ namespace Tokito.Services.Auth
         Task<SignInResult> LoginAsync(UserLoginDTO dto);
 
         Task<UserProfileDto> GetProfileAsync(int userId);
+        Task<IEnumerable<UserProfileDto>> GetAllProfilesAsync();
 
         Task<ChangeCountryResultDto> ChangeCountryAsync(int userId, ChangeCountryDto dto);
 

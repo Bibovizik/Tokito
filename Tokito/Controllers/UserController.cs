@@ -16,6 +16,21 @@ namespace Tokito.Controllers
             _authService = authService;
         }
 
+        [Authorize(Roles = "Admin")]
+        [HttpGet("getAllUsers")]
+        public async Task<IActionResult> GetAllUsers()
+        {
+            try
+            {
+                var profile = await _authService.GetAllProfilesAsync();
+                return Ok(profile);
+            }
+            catch (Exception exception)
+            {
+                return NotFound(new { message = exception.Message });
+            }
+        }
+
         [Authorize]
         [HttpGet("profile")]
         public async Task<IActionResult> GetProfile()

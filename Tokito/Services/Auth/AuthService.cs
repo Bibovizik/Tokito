@@ -539,6 +539,54 @@ namespace Tokito.Services.Auth
             };
         }
 
+        public async Task<IEnumerable<UserProfileDto>> GetAllProfilesAsync()
+        {
+            var usersWithPublishers = await _gameStore.Users.AsNoTracking()
+                .GroupJoin(
+                    _gameStore.Publishers.AsNoTracking(),
+                    user => user.Id,
+                    pub => pub.UserId,
+                    (user, pubGroup) => new { user, pubGroup }
+                )
+                .SelectMany(
+                    x => x.pubGroup.DefaultIfEmpty(),
+                    (x, pub) => new
+                    {
+                        User = x.user,
+                        PublisherId = (int?)pub.PublisherId,
+                        PublisherName = pub.Name
+                    }
+                )
+                .ToListAsync();
+
+            var rolesLookup = (await _gameStore.UserRoles
+                .Join(
+                    _gameStore.Roles,
+                    ur => ur.RoleId,
+                    r => r.Id,
+                    (ur, r) => new { ur.UserId, r.Name }
+                )
+                .ToListAsync())
+                .GroupBy(ur => ur.UserId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Name).ToArray());
+
+            return usersWithPublishers.Select(item => new UserProfileDto
+            {
+                UserId = item.User.Id,
+                UserName = item.User.UserName ?? string.Empty,
+                UserNickname = item.User.UserNickname,
+                Email = item.User.Email,
+                CountryCode = item.User.CountryCode,
+                RegistrationDate = item.User.RegistrationDate,
+                AccountStatusCode = item.User.AccountStatus,
+                AccountStatus = ResolveAccountStatusName(item.User.AccountStatus),
+                PublisherId = item.PublisherId,
+                PublisherName = item.PublisherName,
+                Roles = (rolesLookup.TryGetValue(item.User.Id, out var roles) ? roles : Array.Empty<string>())
+                            .OrderBy(r => r)
+                            .ToArray()
+            }).ToList();
+        }
         private sealed record ChangeCountryRateSnapshot(
             decimal? CurrentCurrencyExchangeRateToUahSnapshot,
             decimal? NewCurrencyExchangeRateToUahSnapshot);
