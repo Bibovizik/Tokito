@@ -6,8 +6,6 @@ namespace Tokito.DTOs.WalletDTOs
     {
         public decimal Amount { get; set; }
 
-        public decimal? ExchangeRateToUahSnapshot { get; set; }
-
         [StringLength(200)]
         public string? Description { get; set; }
     }

@@ -3,6 +3,7 @@ using Tokito.Data;
 using Tokito.DTOs.WalletDTOs;
 using Tokito.Models;
 using Tokito.Services.Markets;
+using Tokito.Services.Pricing;
 
 namespace Tokito.Services.Wallets
 {
@@ -12,11 +13,16 @@ namespace Tokito.Services.Wallets
 
         private readonly GameStore _gameStore;
         private readonly IMarketResolver _marketResolver;
+        private readonly INbuExchangeRateService _nbuExchangeRateService;
 
-        public WalletService(GameStore gameStore, IMarketResolver marketResolver)
+        public WalletService(
+            GameStore gameStore,
+            IMarketResolver marketResolver,
+            INbuExchangeRateService nbuExchangeRateService)
         {
             _gameStore = gameStore;
             _marketResolver = marketResolver;
+            _nbuExchangeRateService = nbuExchangeRateService;
         }
 
         public async Task<WalletSummaryDto> GetWalletAsync(int userId)
@@ -63,11 +69,8 @@ namespace Tokito.Services.Wallets
             if (dto.Amount < 0.01m || dto.Amount > 100_000m)
                 throw new ArgumentOutOfRangeException(nameof(dto.Amount), "Amount must be between 0.01 and 100000.");
 
-            if (dto.ExchangeRateToUahSnapshot.HasValue &&
-                (dto.ExchangeRateToUahSnapshot.Value < 0.00001m || dto.ExchangeRateToUahSnapshot.Value > 999_999_999m))
-                throw new ArgumentOutOfRangeException(nameof(dto.ExchangeRateToUahSnapshot), "Exchange rate must be positive.");
-
             var walletCurrencyCode = await GetWalletCurrencyCodeAsync(userId);
+            var exchangeRateToUahSnapshot = await ResolveWalletExchangeRateToUahSnapshotAsync(walletCurrencyCode);
             var createdAt = DateTime.UtcNow;
 
             await using var transaction = await _gameStore.Database.BeginTransactionAsync();
@@ -97,12 +100,8 @@ namespace Tokito.Services.Wallets
                 EntryType = WalletEntryType.TopUp,
                 CreatedAt = createdAt,
                 Description = string.IsNullOrWhiteSpace(dto.Description) ? "Manual top-up" : dto.Description.Trim(),
-                ExchangeRateToUahSnapshot = walletCurrencyCode == BaseCurrencyCode ? 1m : dto.ExchangeRateToUahSnapshot,
-                AmountUahSnapshot = walletCurrencyCode == BaseCurrencyCode
-                    ? dto.Amount
-                    : dto.ExchangeRateToUahSnapshot.HasValue
-                        ? Math.Round(dto.Amount * dto.ExchangeRateToUahSnapshot.Value, 2, MidpointRounding.AwayFromZero)
-                        : null
+                ExchangeRateToUahSnapshot = exchangeRateToUahSnapshot,
+                AmountUahSnapshot = Math.Round(dto.Amount * exchangeRateToUahSnapshot, 2, MidpointRounding.AwayFromZero)
             });
 
             await _gameStore.SaveChangesAsync();
@@ -126,6 +125,31 @@ namespace Tokito.Services.Wallets
                 .SingleOrDefaultAsync();
 
             return await _marketResolver.ResolveWalletCurrencyCodeAsync(countryCode);
+        }
+
+        private async Task<decimal> ResolveWalletExchangeRateToUahSnapshotAsync(string walletCurrencyCode)
+        {
+            if (string.Equals(walletCurrencyCode, BaseCurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return 1m;
+            }
+
+            IReadOnlyDictionary<string, ExchangeRateQuote> exchangeRates;
+            try
+            {
+                exchangeRates = await _nbuExchangeRateService.GetRatesToUahAsync();
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new HttpRequestException(exception.Message, exception);
+            }
+
+            if (!exchangeRates.TryGetValue(walletCurrencyCode.Trim().ToUpperInvariant(), out var exchangeRateQuote))
+            {
+                throw new HttpRequestException($"NBU exchange rate for {walletCurrencyCode} is unavailable.");
+            }
+
+            return exchangeRateQuote.RateToUah;
         }
     }
 }
