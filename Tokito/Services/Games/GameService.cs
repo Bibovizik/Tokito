@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using Tokito.Data;
 using Tokito.DTOs.Common;
 using Tokito.DTOs.GameDTOs;
@@ -547,12 +549,10 @@ namespace Tokito.Services.Games
 
         public async Task<PurchaseGameResult> PurchaseGameAsync(int userId, int gameId)
         {
-            await using var dbTransaction = await _gameStore.Database.BeginTransactionAsync();
-
             try
             {
                 var user = await _gameStore.Users
-                    .Include(u => u.Games)
+                    .AsNoTracking()
                     .SingleOrDefaultAsync(u => u.Id == userId);
 
                 if (user == null)
@@ -587,56 +587,14 @@ namespace Tokito.Services.Games
                         $"This account wallet uses {walletCurrencyCode}, but no wallet charge price is available for this game.");
                 }
 
-                var walletBalance = await _gameStore.WalletBalances
-                    .SingleOrDefaultAsync(b => b.UserId == userId);
-
-                if (walletBalance == null || walletBalance.AvailableAmount < walletChargePrice.Amount)
-                {
-                    return PurchaseGameResult.Failure(
-                        PurchaseGameStatus.InsufficientFunds,
-                        $"Insufficient {walletCurrencyCode} balance for this purchase.");
-                }
-
-                walletBalance.AvailableAmount -= walletChargePrice.Amount;
                 var purchaseDate = DateTime.UtcNow;
                 var exchangeRateToUah = walletChargePrice.ExchangeRateToUahSnapshot ?? (walletChargePrice.CurrencyCode == BaseCurrencyCode ? 1m : null);
-                var amountUahSnapshot = exchangeRateToUah.HasValue
-                    ? Math.Round(walletChargePrice.Amount * exchangeRateToUah.Value, 2, MidpointRounding.AwayFromZero)
-                    : game.BasePriceUah;
-
-                var transaction = new Transaction
-                {
-                    UserId = userId,
-                    GameId = gameId,
-                    PurchaseDate = purchaseDate,
-                    AmountPaid = walletChargePrice.Amount,
-                    CurrencyCode = walletChargePrice.CurrencyCode,
-                    BasePriceUahSnapshot = game.BasePriceUah,
-                    ExchangeRateSnapshot = exchangeRateToUah,
-                    PriceSource = walletChargePrice.PriceSource,
-                    RegionId = walletChargePrice.RegionId
-                };
-
-                var walletEntry = new WalletEntry
-                {
-                    UserId = userId,
-                    CurrencyCode = walletChargePrice.CurrencyCode,
-                    Amount = -walletChargePrice.Amount,
-                    BalanceAfter = walletBalance.AvailableAmount,
-                    EntryType = WalletEntryType.Purchase,
-                    CreatedAt = purchaseDate,
-                    Transaction = transaction,
-                    Description = $"Purchased {game.Name}",
-                    ExchangeRateToUahSnapshot = exchangeRateToUah,
-                    AmountUahSnapshot = amountUahSnapshot
-                };
-
-                user.Games.Add(game);
-                _gameStore.Transactions.Add(transaction);
-                _gameStore.WalletEntries.Add(walletEntry);
-
-                await _gameStore.SaveChangesAsync();
-                await dbTransaction.CommitAsync();
+                var remainingBalance = await ExecutePurchaseProcedureAsync(
+                    userId,
+                    game,
+                    walletChargePrice,
+                    exchangeRateToUah,
+                    purchaseDate);
 
                 return PurchaseGameResult.Success(new PurchaseReceiptDto
                 {
@@ -644,22 +602,32 @@ namespace Tokito.Services.Games
                     GameName = game.Name,
                     PurchasedAt = purchaseDate,
                     ChargedPrice = MapPriceDto(walletChargePrice),
-                    RemainingBalance = walletBalance.AvailableAmount
+                    RemainingBalance = remainingBalance
                 });
             }
-            catch (DbUpdateConcurrencyException)
+            catch (SqlException exception) when (exception.Number == 50003)
             {
-                await dbTransaction.RollbackAsync();
                 return PurchaseGameResult.Failure(
-                    PurchaseGameStatus.ConcurrencyConflict,
-                    "Wallet balance changed during checkout. Retry the purchase.");
+                    PurchaseGameStatus.AlreadyOwned,
+                    "You already own this game.");
             }
-            catch (DbUpdateException)
+            catch (SqlException exception) when (exception.Number == 50004)
             {
-                await dbTransaction.RollbackAsync();
                 return PurchaseGameResult.Failure(
-                    PurchaseGameStatus.PurchaseConflict,
-                    "Purchase could not be completed because the game ownership or wallet state changed.");
+                    PurchaseGameStatus.InsufficientFunds,
+                    "Insufficient wallet balance for this purchase.");
+            }
+            catch (SqlException exception) when (exception.Number == 50002)
+            {
+                return PurchaseGameResult.Failure(
+                    PurchaseGameStatus.GameNotFound,
+                    "Game was not found.");
+            }
+            catch (SqlException exception) when (exception.Number == 50001)
+            {
+                return PurchaseGameResult.Failure(
+                    PurchaseGameStatus.UserNotFound,
+                    "User account was not found.");
             }
         }
 
@@ -688,6 +656,57 @@ namespace Tokito.Services.Games
                 DeleteInitializerId = publisherId,
                 GameId = gameId
             });
+        }
+
+        private async Task<decimal> ExecutePurchaseProcedureAsync(
+            int userId,
+            Game game,
+            ResolvedGamePrice walletChargePrice,
+            decimal? exchangeRateToUah,
+            DateTime purchaseDate)
+        {
+            var remainingBalanceParameter = new SqlParameter("@RemainingBalance", SqlDbType.Decimal)
+            {
+                Precision = 18,
+                Scale = 2,
+                Direction = ParameterDirection.Output
+            };
+
+            var transactionIdParameter = new SqlParameter("@TransactionId", SqlDbType.Int)
+            {
+                Direction = ParameterDirection.Output
+            };
+
+            await _gameStore.Database.ExecuteSqlRawAsync(
+                @"EXEC dbo.usp_PurchaseGame
+                    @UserId,
+                    @GameId,
+                    @AmountPaid,
+                    @CurrencyCode,
+                    @BasePriceUahSnapshot,
+                    @ExchangeRateSnapshot,
+                    @PriceSource,
+                    @RegionId,
+                    @PurchaseDateUtc,
+                    @Description,
+                    @TransactionId OUTPUT,
+                    @RemainingBalance OUTPUT",
+                CreateSqlParameter("@UserId", userId),
+                CreateSqlParameter("@GameId", game.GameId),
+                CreateDecimalParameter("@AmountPaid", walletChargePrice.Amount, 18, 2),
+                CreateSqlParameter("@CurrencyCode", walletChargePrice.CurrencyCode),
+                CreateDecimalParameter("@BasePriceUahSnapshot", game.BasePriceUah, 18, 2),
+                CreateNullableDecimalParameter("@ExchangeRateSnapshot", exchangeRateToUah, 18, 6),
+                CreateSqlParameter("@PriceSource", walletChargePrice.PriceSource),
+                CreateSqlParameter("@RegionId", walletChargePrice.RegionId),
+                CreateSqlParameter("@PurchaseDateUtc", purchaseDate),
+                CreateSqlParameter("@Description", $"Purchased {game.Name}"),
+                transactionIdParameter,
+                remainingBalanceParameter);
+
+            return remainingBalanceParameter.Value is decimal remainingBalance
+                ? remainingBalance
+                : Convert.ToDecimal(remainingBalanceParameter.Value);
         }
 
         private GameViewDTO MapGameViewDto(
@@ -1231,6 +1250,31 @@ namespace Tokito.Services.Games
             return string.IsNullOrWhiteSpace(value)
                 ? null
                 : value.Trim();
+        }
+
+        private static SqlParameter CreateSqlParameter(string name, object? value)
+        {
+            return new SqlParameter(name, value ?? DBNull.Value);
+        }
+
+        private static SqlParameter CreateDecimalParameter(string name, decimal value, byte precision, byte scale)
+        {
+            return new SqlParameter(name, SqlDbType.Decimal)
+            {
+                Precision = precision,
+                Scale = scale,
+                Value = value
+            };
+        }
+
+        private static SqlParameter CreateNullableDecimalParameter(string name, decimal? value, byte precision, byte scale)
+        {
+            return new SqlParameter(name, SqlDbType.Decimal)
+            {
+                Precision = precision,
+                Scale = scale,
+                Value = value.HasValue ? value.Value : DBNull.Value
+            };
         }
 
         private static (DateOnly DateFrom, DateOnly DateTo) NormalizeDateRange(DateOnly? dateFrom, DateOnly? dateTo)

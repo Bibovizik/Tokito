@@ -1,33 +1,29 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using System.Security.Claims;
 using Tokito.Data;
 using Tokito.DTOs.UserDTOs;
 using Tokito.Models;
 using Tokito.Services.Games;
-using Tokito.Services.Markets;
 
 namespace Tokito.Services.Auth
 {
     public class AuthService : IAuthService
     {
-        private const string BaseCurrencyCode = "UAH";
-
         private readonly UserManager<User> _userManager;
         private readonly SignInManager<User> _signInManager;
         private readonly GameStore _gameStore;
-        private readonly IMarketResolver _marketResolver;
 
         public AuthService(
             UserManager<User> userManager,
             SignInManager<User> signInManager,
-            GameStore gameStore,
-            IMarketResolver marketResolver)
+            GameStore gameStore)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _gameStore = gameStore;
-            _marketResolver = marketResolver;
         }
 
         public async Task<IdentityResult> RegisterUserAsync(UserRegistrationDTO dto)
@@ -287,91 +283,29 @@ namespace Tokito.Services.Auth
 
             ValidateExchangeRate(dto.CurrentCurrencyExchangeRateToUahSnapshot, nameof(dto.CurrentCurrencyExchangeRateToUahSnapshot));
             ValidateExchangeRate(dto.NewCurrencyExchangeRateToUahSnapshot, nameof(dto.NewCurrencyExchangeRateToUahSnapshot));
-
-            var changedAt = DateTime.UtcNow;
             var normalizedCountryCode = dto.CountryCode.Trim().ToUpperInvariant();
 
-            await using var transaction = await _gameStore.Database.BeginTransactionAsync();
-
-            var user = await _gameStore.Users.SingleOrDefaultAsync(u => u.Id == userId);
-            if (user == null)
-                throw new InvalidOperationException("User account was not found.");
-
-            var previousCountryCode = user.CountryCode.Trim().ToUpperInvariant();
-            var previousCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(previousCountryCode);
-            var newCurrencyCode = await _marketResolver.ResolveWalletCurrencyCodeAsync(normalizedCountryCode);
-
-            var balance = await _gameStore.WalletBalances.SingleOrDefaultAsync(b => b.UserId == userId);
-            var previousBalance = balance?.AvailableAmount ?? 0m;
-            var convertedBalance = previousBalance;
-            var balanceWasConverted = false;
-
-            if (!string.Equals(previousCurrencyCode, newCurrencyCode, StringComparison.OrdinalIgnoreCase) &&
-                previousBalance != 0m)
+            try
             {
-                var previousRateToUah = ResolveRateToUah(previousCurrencyCode, dto.CurrentCurrencyExchangeRateToUahSnapshot, nameof(dto.CurrentCurrencyExchangeRateToUahSnapshot));
-                var newRateToUah = ResolveRateToUah(newCurrencyCode, dto.NewCurrencyExchangeRateToUahSnapshot, nameof(dto.NewCurrencyExchangeRateToUahSnapshot));
-                var amountUah = previousCurrencyCode == BaseCurrencyCode
-                    ? previousBalance
-                    : previousBalance * previousRateToUah;
+                var result = await ExecuteChangeCountryProcedureAsync(userId, normalizedCountryCode, dto);
 
-                convertedBalance = newCurrencyCode == BaseCurrencyCode
-                    ? amountUah
-                    : amountUah / newRateToUah;
-                convertedBalance = Math.Round(convertedBalance, 2, MidpointRounding.AwayFromZero);
-
-                balance!.AvailableAmount = convertedBalance;
-                balanceWasConverted = true;
-
-                var description = string.IsNullOrWhiteSpace(dto.Description)
-                    ? $"Wallet converted due to country change from {previousCountryCode} to {normalizedCountryCode}"
-                    : dto.Description.Trim();
-                var amountUahSnapshot = Math.Round(amountUah, 2, MidpointRounding.AwayFromZero);
-
-                _gameStore.WalletEntries.Add(new WalletEntry
+                var updatedUser = await _userManager.FindByIdAsync(userId.ToString());
+                if (updatedUser == null)
                 {
-                    UserId = userId,
-                    CurrencyCode = previousCurrencyCode,
-                    Amount = -previousBalance,
-                    BalanceAfter = 0m,
-                    EntryType = WalletEntryType.CurrencyConversion,
-                    CreatedAt = changedAt,
-                    Description = description,
-                    ExchangeRateToUahSnapshot = previousRateToUah,
-                    AmountUahSnapshot = amountUahSnapshot
-                });
+                    throw new InvalidOperationException("User account was not found.");
+                }
 
-                _gameStore.WalletEntries.Add(new WalletEntry
-                {
-                    UserId = userId,
-                    CurrencyCode = newCurrencyCode,
-                    Amount = convertedBalance,
-                    BalanceAfter = convertedBalance,
-                    EntryType = WalletEntryType.CurrencyConversion,
-                    CreatedAt = changedAt,
-                    Description = description,
-                    ExchangeRateToUahSnapshot = newRateToUah,
-                    AmountUahSnapshot = amountUahSnapshot
-                });
+                await SignInUserAsync(updatedUser);
+                return result;
             }
-
-            user.CountryCode = normalizedCountryCode;
-
-            await _gameStore.SaveChangesAsync();
-            await transaction.CommitAsync();
-            await SignInUserAsync(user);
-
-            return new ChangeCountryResultDto
+            catch (SqlException exception) when (exception.Number == 50014)
             {
-                PreviousCountryCode = previousCountryCode,
-                CountryCode = normalizedCountryCode,
-                PreviousCurrencyCode = previousCurrencyCode,
-                CurrencyCode = newCurrencyCode,
-                PreviousBalance = previousBalance,
-                ConvertedBalance = convertedBalance,
-                ChangedAt = changedAt,
-                BalanceWasConverted = balanceWasConverted
-            };
+                throw new InvalidOperationException("User account was not found.");
+            }
+            catch (SqlException exception) when (exception.Number is 50015 or 50016)
+            {
+                throw new ArgumentException(exception.Message, nameof(dto));
+            }
         }
 
         public async Task LogoutAsync()
@@ -429,6 +363,55 @@ namespace Tokito.Services.Auth
             });
         }
 
+        private async Task<ChangeCountryResultDto> ExecuteChangeCountryProcedureAsync(int userId, string normalizedCountryCode, ChangeCountryDto dto)
+        {
+            var connection = _gameStore.Database.GetDbConnection();
+            var shouldCloseConnection = connection.State != ConnectionState.Open;
+
+            if (shouldCloseConnection)
+            {
+                await connection.OpenAsync();
+            }
+
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "dbo.usp_ChangeCountryAndConvertWallet";
+                command.CommandType = CommandType.StoredProcedure;
+
+                command.Parameters.Add(CreateSqlParameter("@UserId", userId));
+                command.Parameters.Add(CreateSqlParameter("@NewCountryCode", normalizedCountryCode));
+                command.Parameters.Add(CreateSqlParameter("@CurrentCurrencyExchangeRateToUahSnapshot", dto.CurrentCurrencyExchangeRateToUahSnapshot));
+                command.Parameters.Add(CreateSqlParameter("@NewCurrencyExchangeRateToUahSnapshot", dto.NewCurrencyExchangeRateToUahSnapshot));
+                command.Parameters.Add(CreateSqlParameter("@Description", string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim()));
+
+                await using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                {
+                    throw new InvalidOperationException("Stored procedure dbo.usp_ChangeCountryAndConvertWallet did not return a result.");
+                }
+
+                return new ChangeCountryResultDto
+                {
+                    PreviousCountryCode = reader.GetString(reader.GetOrdinal("PreviousCountryCode")),
+                    CountryCode = reader.GetString(reader.GetOrdinal("CountryCode")),
+                    PreviousCurrencyCode = reader.GetString(reader.GetOrdinal("PreviousCurrencyCode")),
+                    CurrencyCode = reader.GetString(reader.GetOrdinal("CurrencyCode")),
+                    PreviousBalance = reader.GetDecimal(reader.GetOrdinal("PreviousBalance")),
+                    ConvertedBalance = reader.GetDecimal(reader.GetOrdinal("ConvertedBalance")),
+                    ChangedAt = reader.GetDateTime(reader.GetOrdinal("ChangedAt")),
+                    BalanceWasConverted = reader.GetBoolean(reader.GetOrdinal("BalanceWasConverted"))
+                };
+            }
+            finally
+            {
+                if (shouldCloseConnection)
+                {
+                    await connection.CloseAsync();
+                }
+            }
+        }
+
         private static void ValidateExchangeRate(decimal? exchangeRate, string paramName)
         {
             if (exchangeRate.HasValue &&
@@ -438,14 +421,9 @@ namespace Tokito.Services.Auth
             }
         }
 
-        private static decimal ResolveRateToUah(string currencyCode, decimal? exchangeRateToUah, string paramName)
+        private static SqlParameter CreateSqlParameter(string name, object? value)
         {
-            if (currencyCode == BaseCurrencyCode)
-                return 1m;
-
-            return exchangeRateToUah ?? throw new ArgumentException(
-                $"Exchange rate to UAH is required for {currencyCode}.",
-                paramName);
+            return new SqlParameter(name, value ?? DBNull.Value);
         }
 
         private async Task RecalculateGameRatingsAsync(IReadOnlyCollection<int> gameIds)
