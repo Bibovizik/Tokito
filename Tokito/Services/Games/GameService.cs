@@ -63,19 +63,13 @@ namespace Tokito.Services.Games
             return MapGameViewDto(game, storefrontRegion, walletCurrencyCode, isOwned, includeReviews: false);
         }
 
-        public async Task<List<GameViewDTO>> GetGamesByGenresAsync(string? genre, int? userId = null, string? countryCode = null)
+        public async Task<List<GameViewDTO>> GetGamesAsync(
+            string? name = null,
+            IEnumerable<string>? genres = null,
+            int? userId = null,
+            string? countryCode = null)
         {
-            var query = _gameStore.Games
-                .AsNoTracking()
-                .Include(g => g.Genres)
-                .Include(g => g.RegionalPrices)
-                    .ThenInclude(price => price.Region)
-                .AsQueryable();
-
-            if (!string.IsNullOrWhiteSpace(genre))
-            {
-                query = query.Where(game => game.Genres.Any(g => g.Name == genre));
-            }
+            var query = ApplyGameFilters(CreateGameListQuery(), name, genres);
 
             var games = await query
                 .OrderBy(game => game.GameId)
@@ -100,24 +94,15 @@ namespace Tokito.Services.Games
                 .ToList();
         }
 
-        public async Task<PagedResultDto<GameViewDTO>> GetGamesByGenresPagedAsync(
-            string? genre,
+        public async Task<PagedResultDto<GameViewDTO>> GetGamesPagedAsync(
+            string? name,
+            IEnumerable<string>? genres,
             int page,
             int pageSize,
             int? userId = null,
             string? countryCode = null)
         {
-            var query = _gameStore.Games
-                .AsNoTracking()
-                .Include(g => g.Genres)
-                .Include(g => g.RegionalPrices)
-                    .ThenInclude(price => price.Region)
-                .AsQueryable();
-
-            if (!string.IsNullOrWhiteSpace(genre))
-            {
-                query = query.Where(game => game.Genres.Any(currentGenre => currentGenre.Name == genre));
-            }
+            var query = ApplyGameFilters(CreateGameListQuery(), name, genres);
 
             var totalCount = await query.CountAsync();
             var games = await query
@@ -951,6 +936,37 @@ namespace Tokito.Services.Games
                     regionalPrice.PriceSource);
         }
 
+        private IQueryable<Game> CreateGameListQuery()
+        {
+            return _gameStore.Games
+                .AsNoTracking()
+                .Include(game => game.Genres)
+                .Include(game => game.RegionalPrices)
+                    .ThenInclude(price => price.Region)
+                .AsQueryable();
+        }
+
+        private static IQueryable<Game> ApplyGameFilters(IQueryable<Game> query, string? name, IEnumerable<string>? genres)
+        {
+            var normalizedName = NormalizeOptionalText(name)?.ToUpperInvariant();
+            if (!string.IsNullOrWhiteSpace(normalizedName))
+            {
+                query = query.Where(game => game.Name.ToUpper().Contains(normalizedName));
+            }
+
+            var normalizedGenres = NormalizeGenreFilters(genres);
+            if (normalizedGenres.Count > 0)
+            {
+                foreach (var genreFilter in normalizedGenres)
+                {
+                    query = query.Where(game =>
+                        game.Genres.Any(currentGenre => currentGenre.Name.ToUpper() == genreFilter));
+                }
+            }
+
+            return query;
+        }
+
         private async Task<IReadOnlyCollection<Genre>> GetGenresAsync(IEnumerable<int> genreIds, CancellationToken cancellationToken)
         {
             var distinctGenreIds = genreIds
@@ -967,6 +983,22 @@ namespace Tokito.Services.Games
             }
 
             return genres;
+        }
+
+        private static IReadOnlyCollection<string> NormalizeGenreFilters(IEnumerable<string>? genres)
+        {
+            if (genres == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return genres
+                .SelectMany(genre => (genre ?? string.Empty)
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Where(genre => !string.IsNullOrWhiteSpace(genre))
+                .Select(genre => genre.ToUpperInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
         private async Task<IReadOnlyCollection<Region>> GetSupportedMarketsAsync(CancellationToken cancellationToken)

@@ -9,10 +9,15 @@ namespace Tokito.Services.Games
     {
         Task<GameViewDTO?> GetGameByIdAsync(int id, int? userId = null, string? countryCode = null);
 
-        Task<List<GameViewDTO>> GetGamesByGenresAsync(string? genre, int? userId = null, string? countryCode = null);
+        Task<List<GameViewDTO>> GetGamesAsync(
+            string? name = null,
+            IEnumerable<string>? genres = null,
+            int? userId = null,
+            string? countryCode = null);
 
-        Task<PagedResultDto<GameViewDTO>> GetGamesByGenresPagedAsync(
-            string? genre,
+        Task<PagedResultDto<GameViewDTO>> GetGamesPagedAsync(
+            string? name,
+            IEnumerable<string>? genres,
             int page,
             int pageSize,
             int? userId = null,

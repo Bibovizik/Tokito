@@ -238,16 +238,18 @@ namespace Tokito.Controllers
         }
 
         [HttpGet]
-        [Description("Get all games, can pass genre as a query")]
-        public async Task<IActionResult> GetGamesByGenres(
-            [FromQuery] string? genre,
+        [Description("Get all games with optional name search and genre filters")]
+        public async Task<IActionResult> GetGames(
+            [FromQuery] string? name,
+            [FromQuery(Name = "genre")] string[]? genres,
             [FromQuery] string? countryCode = null,
             [FromQuery] PaginationQueryDto? pagination = null)
         {
             if (pagination?.IsSpecified == true)
             {
-                var pagedGames = await _gameService.GetGamesByGenresPagedAsync(
-                    genre,
+                var pagedGames = await _gameService.GetGamesPagedAsync(
+                    name,
+                    genres,
                     pagination.ResolvedPage,
                     pagination.ResolvedPageSize,
                     TryGetCurrentUserId(),
@@ -256,8 +258,9 @@ namespace Tokito.Controllers
                 return Ok(pagedGames);
             }
 
-            var filteredGames = await _gameService.GetGamesByGenresAsync(
-                genre,
+            var filteredGames = await _gameService.GetGamesAsync(
+                name,
+                genres,
                 TryGetCurrentUserId(),
                 User.FindFirst("countryCode")?.Value ?? countryCode);
 

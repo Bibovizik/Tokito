@@ -12,6 +12,7 @@ using Tokito.Services.DataInitialization;
 using Tokito.Services.GameImages;
 using Tokito.Services.GameReviews;
 using Tokito.Services.Games;
+using Tokito.Services.Genres;
 using Tokito.Services.Markets;
 using Tokito.Services.Pricing;
 using Tokito.Services.Wallets;
@@ -101,6 +102,7 @@ namespace Tokito
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IGameImageStorage, GameImageStorage>();
             builder.Services.AddScoped<IGameService, GameService>();
+            builder.Services.AddScoped<IGenreService, GenreService>();
             builder.Services.AddScoped<IMarketResolver, MarketResolver>();
             builder.Services.AddScoped<IWalletService, WalletService>();
             builder.Services.AddScoped<IGameReviewService, GameReviewService>();
