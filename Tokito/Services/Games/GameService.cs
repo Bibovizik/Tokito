@@ -65,6 +65,22 @@ namespace Tokito.Services.Games
             return MapGameViewDto(game, storefrontRegion, walletCurrencyCode, isOwned, includeReviews: false);
         }
 
+        public async Task<IReadOnlyCollection<CreatedGameMarketPriceDto>?> GetGamePricesAsync(int gameId)
+        {
+            var game = await _gameStore.Games
+                .AsNoTracking()
+                .Include(currentGame => currentGame.RegionalPrices)
+                    .ThenInclude(price => price.Region)
+                .SingleOrDefaultAsync(currentGame => currentGame.GameId == gameId);
+
+            if (game == null)
+            {
+                return null;
+            }
+
+            return MapMarketPrices(game);
+        }
+
         public async Task<List<GameViewDTO>> GetGamesAsync(
             string? name = null,
             IEnumerable<string>? genres = null,
@@ -782,20 +798,45 @@ namespace Tokito.Services.Games
                     .Select(genre => genre.Name)
                     .OrderBy(name => name)
                     .ToList(),
-                MarketPrices = plannedMarketPrices
-                    .Select(price => new CreatedGameMarketPriceDto
-                    {
-                        MarketCode = price.MarketCode,
-                        MarketName = price.MarketName,
-                        CurrencyCode = price.CurrencyCode,
-                        CurrencySymbol = price.CurrencySymbol,
-                        Amount = price.Amount,
-                        Source = price.PriceSource,
-                        ExchangeRateToUahSnapshot = price.ExchangeRateToUahSnapshot,
-                        ExchangeDate = price.ExchangeDate
-                    })
-                    .ToList()
+                MarketPrices = MapPlannedMarketPrices(plannedMarketPrices)
             };
+        }
+
+        private static List<CreatedGameMarketPriceDto> MapMarketPrices(Game game)
+        {
+            return game.RegionalPrices
+                .Where(price => price.IsActive)
+                .OrderBy(price => price.RegionId)
+                .Select(price => new CreatedGameMarketPriceDto
+                {
+                    MarketCode = price.Region.Code,
+                    MarketName = price.Region.Name,
+                    CurrencyCode = price.Region.CurrencyCode,
+                    CurrencySymbol = price.Region.CurrencySymbol,
+                    Amount = price.Amount,
+                    Source = price.PriceSource,
+                    ExchangeRateToUahSnapshot = ResolveExchangeRateToUahSnapshot(price.Region.CurrencyCode, price.ExchangeRateToUahSnapshot),
+                    ExchangeDate = price.ExchangeDate
+                })
+                .ToList();
+        }
+
+        private static List<CreatedGameMarketPriceDto> MapPlannedMarketPrices(
+            IReadOnlyCollection<PlannedMarketPrice> plannedMarketPrices)
+        {
+            return plannedMarketPrices
+                .Select(price => new CreatedGameMarketPriceDto
+                {
+                    MarketCode = price.MarketCode,
+                    MarketName = price.MarketName,
+                    CurrencyCode = price.CurrencyCode,
+                    CurrencySymbol = price.CurrencySymbol,
+                    Amount = price.Amount,
+                    Source = price.PriceSource,
+                    ExchangeRateToUahSnapshot = price.ExchangeRateToUahSnapshot,
+                    ExchangeDate = price.ExchangeDate
+                })
+                .ToList();
         }
 
         private RegionalPrice MapRegionalPriceEntity(PlannedMarketPrice price)

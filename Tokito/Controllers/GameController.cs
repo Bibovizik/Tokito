@@ -74,6 +74,19 @@ namespace Tokito.Controllers
             return Ok(game);
         }
 
+        [HttpGet("{id:int}/prices")]
+        [EndpointDescription("Get all stored market prices for a game")]
+        public async Task<IActionResult> GetGamePrices([FromRoute] int id)
+        {
+            var prices = await _gameService.GetGamePricesAsync(id);
+            if (prices == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(prices);
+        }
+
         [Authorize]
         [HttpGet("library")]
         [EndpointDescription("Get purchased games for the current user")]

@@ -9,6 +9,8 @@ namespace Tokito.Services.Games
     {
         Task<GameViewDTO?> GetGameByIdAsync(int id, int? userId = null, string? countryCode = null);
 
+        Task<IReadOnlyCollection<CreatedGameMarketPriceDto>?> GetGamePricesAsync(int gameId);
+
         Task<List<GameViewDTO>> GetGamesAsync(
             string? name = null,
             IEnumerable<string>? genres = null,
