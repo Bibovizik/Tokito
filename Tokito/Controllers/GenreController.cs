@@ -6,7 +6,6 @@ using Tokito.Services.Genres;
 namespace Tokito.Controllers
 {
     [ApiController]
-    [Authorize(Roles = "Admin")]
     [Route("api/genres")]
     public class GenreController : ControllerBase
     {
@@ -32,7 +31,7 @@ namespace Tokito.Controllers
                 ? NotFound(new { message = "Genre was not found." })
                 : Ok(genre);
         }
-
+        [Authorize(Roles = "Admin")]
         [HttpPost]
         public async Task<IActionResult> CreateGenre([FromBody] GenreUpsertDto dto, CancellationToken cancellationToken)
         {
@@ -51,7 +50,7 @@ namespace Tokito.Controllers
                 return Conflict(new { message = exception.Message });
             }
         }
-
+        [Authorize(Roles = "Admin")]
         [HttpPut("{id:int}")]
         public async Task<IActionResult> UpdateGenre([FromRoute] int id, [FromBody] GenreUpsertDto dto, CancellationToken cancellationToken)
         {
@@ -74,7 +73,7 @@ namespace Tokito.Controllers
                 return Conflict(new { message = exception.Message });
             }
         }
-
+        [Authorize(Roles = "Admin")]
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> DeleteGenre([FromRoute] int id, CancellationToken cancellationToken)
         {
