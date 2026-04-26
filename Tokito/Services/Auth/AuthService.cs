@@ -309,6 +309,7 @@ namespace Tokito.Services.Auth
                     throw new KeyNotFoundException("User account was not found.");
                 }
 
+                await _gameStore.Entry(updatedUser).ReloadAsync();
                 await SignInUserAsync(updatedUser);
                 return result;
             }
